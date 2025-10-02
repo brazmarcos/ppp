@@ -444,8 +444,182 @@ def serve_static(filename):
         print(f"Erro ao servir arquivo estático {filename}: {e}")
         return "Arquivo não encontrado", 404
 
-# [INSERIR AQUI TODO O HTML BASE, HTML_ENTRADA E HTML_CONSULTA DO CÓDIGO ANTERIOR]
-# [TODO O HTML PERMANECE EXATAMENTE IGUAL - SÓ MUDAMOS A LÓGICA DO BACKEND]
+# ... (código anterior permanece igual)
+
+# ========== ROTAS PRINCIPAIS ==========
+
+@app.route('/')
+def index():
+    return HTML_BASE
+
+@app.route('/consulta')
+def consulta():
+    return HTML_BASE
+
+# ========== API ROUTES ==========
+
+@app.route('/api/projetos')
+def api_projetos():
+    """API para retornar a lista de projetos"""
+    try:
+        return jsonify({
+            'success': True, 
+            'projetos': PROJETOS
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False, 
+            'message': f'Erro ao carregar projetos: {str(e)}'
+        })
+
+@app.route('/api/selecionar_projeto', methods=['POST'])
+def selecionar_projeto():
+    """API para selecionar um projeto na sessão"""
+    try:
+        data = request.get_json()
+        projeto_id = data.get('projeto_id')
+        
+        if not projeto_id:
+            session.pop('projeto_selecionado', None)
+            return jsonify({'success': True, 'projeto_nome': None})
+        
+        # Encontrar o projeto na lista
+        projeto = next((p for p in PROJETOS if p['id'] == projeto_id), None)
+        
+        if projeto:
+            session['projeto_selecionado'] = {
+                'id': projeto['id'],
+                'nome': projeto['display']
+            }
+            return jsonify({'success': True, 'projeto_nome': projeto['display']})
+        else:
+            return jsonify({'success': False, 'message': 'Projeto não encontrado'})
+            
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
+
+@app.route('/api/conteudo/<pagina>')
+def api_conteudo(pagina):
+    """API para retornar o conteúdo das páginas"""
+    try:
+        projeto = session.get('projeto_selecionado')
+        
+        if pagina == 'entrada':
+            titulo = "Entrada de Informação"
+            subtitulo = projeto['nome'] if projeto else "Selecione um projeto no menu para começar"
+            conteudo = HTML_ENTRADA
+        elif pagina == 'consulta':
+            titulo = "Consulta de Informações"
+            subtitulo = projeto['nome'] if projeto else "Chatbot para consultar e analisar dados"
+            conteudo = HTML_CONSULTA
+        else:
+            return jsonify({'success': False, 'message': 'Página não encontrada'})
+            
+        return jsonify({
+            'success': True,
+            'titulo': titulo,
+            'subtitulo': subtitulo,
+            'conteudo': conteudo
+        })
+            
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
+
+@app.route('/api/verificar_duplicata', methods=['POST'])
+def api_verificar_duplicata():
+    """API para verificar se uma mensagem é duplicada"""
+    try:
+        data = request.get_json()
+        projeto_id = data.get('projeto_id')
+        categoria = data.get('categoria')
+        mensagem = data.get('mensagem')
+        
+        if not all([projeto_id, categoria, mensagem]):
+            return jsonify({'success': False, 'is_duplicata': False})
+        
+        is_duplicata = verificar_duplicata(projeto_id, categoria, mensagem)
+        return jsonify({'success': True, 'is_duplicata': is_duplicata})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'is_duplicata': False})
+
+@app.route('/api/registrar_mensagem', methods=['POST'])
+def registrar_mensagem():
+    try:
+        data = request.get_json()
+        projeto_id = data.get('projeto_id')
+        categoria = data.get('categoria')
+        data_info = data.get('data_info')
+        mensagem = data.get('mensagem')
+        lesson_learned = data.get('lesson_learned', 'não')
+        
+        if not all([projeto_id, categoria, data_info, mensagem, lesson_learned]):
+            return jsonify({'success': False, 'message': 'Todos os campos são obrigatórios'})
+        
+        # Salvar no banco de dados
+        success, message = salvar_no_banco(projeto_id, categoria, data_info, mensagem, lesson_learned)
+        
+        return jsonify({'success': success, 'message': message})
+            
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
+
+@app.route('/api/consultar_dados', methods=['POST'])
+def consultar_dados():
+    try:
+        data = request.get_json()
+        question = data.get('question')
+        projeto_id = data.get('projeto_id')
+        
+        if not question:
+            return jsonify({'success': False, 'message': 'Pergunta não fornecida'})
+        
+        # Usar o DBAnalyzer para processar a pergunta com filtro de projeto
+        answer = db_analyzer.ask_question(question, projeto_id)
+        
+        return jsonify({'success': True, 'answer': answer})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
+
+@app.route('/api/ultimas_mensagens')
+def ultimas_mensagens():
+    try:
+        limite = request.args.get('limite', 10)
+        projeto_id = session.get('projeto_selecionado', {}).get('id')
+        
+        where_clause = f" WHERE projeto = '{projeto_id}'" if projeto_id else ""
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        query = f"SELECT * FROM mensagens{where_clause} ORDER BY timestamp DESC LIMIT {limite}"
+        cursor.execute(query)
+        
+        # Converter para lista de dicionários
+        columns = [description[0] for description in cursor.description]
+        mensagens = []
+        for row in cursor.fetchall():
+            mensagens.append(dict(zip(columns, row)))
+            
+        conn.close()
+        return jsonify({'success': True, 'mensagens': mensagens})
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
+
+# ========== ROTA DE HEALTH CHECK ==========
+
+@app.route('/health')
+def health_check():
+    return jsonify({'status': 'ok', 'message': 'Sistema funcionando'})
+
+# ========== INICIALIZAÇÃO ==========
+
+if __name__ == '__main__':
+    # Inicializar o banco de dados
+    inicializar_banco()
+    
+    # No Render, use a porta fornecida pela variável de ambiente
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
 
 # ... (TODO O RESTO DO CÓDIGO DAS ROTAS API PERMANECE IGUAL)
 
@@ -456,3 +630,4 @@ if __name__ == '__main__':
     # No Render, use a porta fornecida pela variável de ambiente
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
