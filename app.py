@@ -282,9 +282,39 @@ def inicializar_banco():
         )
         ''')
         
+        # Verificar se está vazio e adicionar dados de exemplo
+        cursor.execute("SELECT COUNT(*) FROM mensagens")
+        count = cursor.fetchone()[0]
+        
+        if count == 0:
+            print("Banco vazio. Adicionando dados de exemplo...")
+            # Adicionar alguns dados de exemplo
+            exemplos = [
+                ('2024-01-01 10:00:00', None, 'Informações base', 
+                 'Configuração inicial', 'Sistema implantado', 
+                 'Sistema de registro de projetos foi implantado com sucesso',
+                 '10001', 'não', 'hash_exemplo_1'),
+                 
+                ('2024-01-02 14:30:00', None, 'Lessons learned - Materiais',
+                 'Problema com fornecedor', 'Mudar fornecedor de concreto',
+                 'Fornecedor XYZ atrasou entrega em 15 dias, recomendo mudar para ABC',
+                 '10001', 'sim', 'hash_exemplo_2')
+            ]
+            
+            for exemplo in exemplos:
+                try:
+                    cursor.execute('''
+                    INSERT INTO mensagens (timestamp, remetente, categoria, contexto, 
+                                         mudanca_chave, mensagem_original, projeto, lesson_learned, mensagem_hash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', exemplo)
+                except sqlite3.IntegrityError:
+                    continue  # Pula se já existir
+        
         conn.commit()
         conn.close()
-        print(f"Banco de dados '{DB_NAME}' inicializado com sucesso!")
+        print(f"Banco de dados '{DB_NAME}' inicializado com sucesso! ({count} registros existentes)")
+        
     except Exception as e:
         print(f"Erro ao inicializar banco: {e}")
 
@@ -435,18 +465,687 @@ PROJETOS = carregar_projetos()
 # Inicializar o analisador de banco de dados
 db_analyzer = DBAnalyzer(DEEPSEEK_API_KEY, DB_NAME)
 
-# Rota para servir arquivos estáticos
-@app.route('/static/<path:filename>')
-def serve_static(filename):
-    try:
-        return send_from_directory(app.static_folder, filename)
-    except Exception as e:
-        print(f"Erro ao servir arquivo estático {filename}: {e}")
-        return "Arquivo não encontrado", 404
+# ========== HTML CONTENT ==========
 
-# ... (código anterior permanece igual)
+HTML_BASE = '''
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Registro de Projetos</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            color: #333;
+            display: flex;
+        }
+        .sidebar {
+            width: 250px;
+            background-color: #2c3e50;
+            color: white;
+            height: 100vh;
+            padding: 20px;
+            position: fixed;
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar-content {
+            flex: 1;
+        }
+        .sidebar h2 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .sidebar nav ul {
+            list-style: none;
+            padding: 0;
+            margin-bottom: 30px;
+        }
+        .sidebar nav ul li {
+            margin-bottom: 10px;
+        }
+        .sidebar nav ul li a {
+            color: white;
+            text-decoration: none;
+            padding: 10px 15px;
+            display: block;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        .sidebar nav ul li a:hover {
+            background-color: #34495e;
+        }
+        .sidebar nav ul li a.active {
+            background-color: #3498db;
+        }
+        .projeto-selecionado {
+            background-color: #27ae60;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .projeto-nao-selecionado {
+            background-color: #e74c3c;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .select-projeto {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            border: none;
+        }
+        .sidebar-image {
+            margin-top: auto;
+            text-align: center;
+            padding: 10px 0;
+            border-top: 1px solid #34495e;
+        }
+        .sidebar-image img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 5px;
+        }
+        .main-content {
+            margin-left: 250px;
+            padding: 20px;
+            width: calc(100% - 250px);
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            border-radius: 5px 5px 0 0;
+        }
+        .chat-container {
+            background-color: white;
+            border-radius: 0 0 5px 5px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .bot-message {
+            background-color: #e8f4f8;
+            border-left: 4px solid #3498db;
+        }
+        .user-message {
+            background-color: #f0f7f0;
+            border-left: 4px solid #2ecc71;
+            text-align: right;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        .hidden {
+            display: none;
+        }
+        .option-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .option-button {
+            padding: 10px 15px;
+            background-color: #ecf0f1;
+            border: 1px solid #bdc3c7;
+            border-radius: 4px;
+            cursor: pointer;
+            text-align: center;
+            min-width: 100px;
+        }
+        .option-button.selected {
+            background-color: #3498db;
+            color: white;
+            border-color: #2980b9;
+        }
+        #chat-messages {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+        }
+        .success-message {
+            color: #27ae60;
+            font-weight: bold;
+        }
+        .error-message {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .no-projeto-selecionado {
+            text-align: center;
+            padding: 40px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="sidebar-content">
+            <h2>Menu</h2>
+            
+            <div id="projeto-info">
+                <select id="projeto-select" class="select-projeto">
+                    <option value="">-- Selecione um Projeto --</option>
+                </select>
+                <button onclick="selecionarProjeto()" style="width: 100%; margin-top: 0;">Selecionar Projeto</button>
+                <div id="projeto-status" class="projeto-nao-selecionado">
+                    Nenhum projeto selecionado
+                </div>
+            </div>
+            
+            <nav>
+                <ul>
+                    <li><a href="#" onclick="carregarPagina('entrada')" id="nav-entrada" class="active">Entrada de Informação</a></li>
+                    <li><a href="#" onclick="carregarPagina('consulta')" id="nav-consulta">Consulta de Informação</a></li>
+                </ul>
+            </nav>
+        </div>
+        
+        <div class="sidebar-image">
+            <img src="/static/PPP.png" alt="Logo">
+        </div>
+    </div>
 
-# ========== ROTAS PRINCIPAIS ==========
+    <div class="main-content">
+        <div class="container">
+            <header>
+                <h1 id="titulo-pagina">Sistema de Registro de Projetos</h1>
+                <p id="subtitulo-pagina">Selecione um projeto no menu para começar</p>
+            </header>
+
+            <div id="conteudo-pagina">
+                <div class="no-projeto-selecionado">
+                    <h3>Selecione um projeto no menu lateral para começar</h3>
+                    <p>Escolha um projeto na lista dropdown e clique em "Selecionar Projeto"</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let projetoSelecionado = null;
+        let paginaAtual = 'entrada';
+        
+        window.onload = function() {
+            carregarListaProjetos();
+        };
+        
+        function carregarListaProjetos() {
+            fetch('/api/projetos')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const select = document.getElementById('projeto-select');
+                        while (select.options.length > 1) {
+                            select.remove(1);
+                        }
+                        
+                        data.projetos.forEach(projeto => {
+                            const option = document.createElement('option');
+                            option.value = projeto.id;
+                            option.textContent = projeto.display;
+                            select.appendChild(option);
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Erro ao carregar projetos:', error);
+                });
+        }
+        
+        function selecionarProjeto() {
+            const select = document.getElementById('projeto-select');
+            const projetoId = select.value;
+            
+            if (!projetoId) {
+                alert("Por favor, selecione um projeto da lista.");
+                return;
+            }
+            
+            fetch('/api/selecionar_projeto', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ projeto_id: projetoId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    projetoSelecionado = {
+                        id: projetoId,
+                        nome: data.projeto_nome
+                    };
+                    atualizarStatusProjeto();
+                    carregarPagina(paginaAtual);
+                } else {
+                    alert('Erro ao selecionar projeto: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Erro:', error);
+                alert('Erro ao selecionar projeto');
+            });
+        }
+        
+        function atualizarStatusProjeto() {
+            const statusDiv = document.getElementById('projeto-status');
+            const select = document.getElementById('projeto-select');
+            
+            if (projetoSelecionado) {
+                statusDiv.className = 'projeto-selecionado';
+                statusDiv.innerHTML = `Projeto: <strong>${projetoSelecionado.nome}</strong>`;
+                select.value = projetoSelecionado.id;
+            } else {
+                statusDiv.className = 'projeto-nao-selecionado';
+                statusDiv.textContent = 'Nenhum projeto selecionado';
+                select.value = '';
+            }
+        }
+        
+        function carregarPagina(pagina) {
+            paginaAtual = pagina;
+            
+            document.querySelectorAll('.sidebar nav a').forEach(link => {
+                link.classList.remove('active');
+            });
+            document.getElementById(`nav-${pagina}`).classList.add('active');
+            
+            fetch(`/api/conteudo/${pagina}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('conteudo-pagina').innerHTML = data.conteudo;
+                        document.getElementById('titulo-pagina').textContent = data.titulo;
+                        document.getElementById('subtitulo-pagina').textContent = data.subtitulo;
+                        
+                        if (pagina === 'entrada') {
+                            inicializarEntrada();
+                        } else if (pagina === 'consulta') {
+                            inicializarConsulta();
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Erro ao carregar conteúdo:', error);
+                    document.getElementById('conteudo-pagina').innerHTML = '<div class="error-message">Erro ao carregar a página</div>';
+                });
+        }
+        
+        function inicializarEntrada() {
+            console.log('Entrada inicializada');
+        }
+        
+        function inicializarConsulta() {
+            console.log('Consulta inicializada');
+        }
+    </script>
+</body>
+</html>
+'''
+
+HTML_ENTRADA = '''
+<div class="chat-container">
+    <div id="chat-messages">
+        <div class="message bot-message" id="mensagem-inicial">
+            Carregando...
+        </div>
+    </div>
+
+    <div id="input-section">
+        <div id="categoria-step" class="input-group hidden">
+            <label>Selecione a categoria:</label>
+            <div class="option-buttons">
+                <div class="option-button" onclick="selectCategory(this, 'Informações base')">Informações base</div>
+                <div class="option-button" onclick="selectCategory(this, 'Envoltória')">Envoltória</div>
+                <div class="option-button" onclick="selectCategory(this, 'Materiais')">Materiais</div>
+                <div class="option-button" onclick="selectCategory(this, 'Água')">Água</div>
+                <div class="option-button" onclick="selectCategory(this, 'HVAC')">HVAC</div>
+                <div class="option-button" onclick="selectCategory(this, 'Elétrica')">Elétrica</div>
+                <div class="option-button" onclick="selectCategory(this, 'LEED')">LEED</div>
+                <div class="option-button" onclick="selectCategory(this, 'Lessons learned')">Lessons learned</div>
+                <div class="option-button" onclick="selectCategory(this, 'Outros')">Outros</div>
+            </div>
+            <button onclick="submitCategory()">Enviar</button>
+        </div>
+
+        <div id="subcategoria-step" class="input-group hidden">
+            <label>Selecione a subcategoria da Lesson Learned:</label>
+            <div class="option-buttons">
+                <div class="option-button" onclick="selectSubCategory(this, 'Informações base')">Informações base</div>
+                <div class="option-button" onclick="selectSubCategory(this, 'Envoltória')">Envoltória</div>
+                <div class="option-button" onclick="selectSubCategory(this, 'Materiais')">Materiais</div>
+                <div class="option-button" onclick="selectSubCategory(this, 'Água')">Água</div>
+                <div class="option-button" onclick="selectSubCategory(this, 'HVAC')">HVAC</div>
+                <div class="option-button" onclick="selectSubCategory(this, 'Elétrica')">Elétrica</div>
+                <div class="option-button" onclick="selectSubCategory(this, 'LEED')">LEED</div>
+                <div class="option-button" onclick="selectSubCategory(this, 'Outros')">Outros</div>
+            </div>
+            <button onclick="submitSubCategory()">Enviar</button>
+        </div>
+
+        <div id="data-step" class="input-group hidden">
+            <label for="data-info">Data da Informação:</label>
+            <input type="datetime-local" id="data-info">
+            <button onclick="submitDate()">Enviar</button>
+        </div>
+
+        <div id="mensagem-step" class="input-group hidden">
+            <label for="mensagem">Informação:</label>
+            <textarea id="mensagem" rows="4" placeholder="Digite a informação que deseja registrar"></textarea>
+            <button onclick="submitMessage()">Registrar Informação</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    function inicializarEntrada() {
+        const now = new Date();
+        const localDateTime = now.toISOString().slice(0, 16);
+        document.getElementById('data-info').value = localDateTime;
+        
+        const mensagemInicial = document.getElementById('mensagem-inicial');
+        if (projetoSelecionado) {
+            mensagemInicial.textContent = 
+                `Olá! Você está registrando informações para o projeto ${projetoSelecionado.nome}. Selecione a categoria da informação.`;
+            document.getElementById('categoria-step').classList.remove('hidden');
+        } else {
+            mensagemInicial.textContent = 
+                'Por favor, selecione um projeto no menu lateral para começar a registrar informações.';
+        }
+    }
+    
+    window.selectCategory = function(element, selectedCategory) {
+        if (!projetoSelecionado) return;
+        
+        const buttons = document.querySelectorAll('#categoria-step .option-button');
+        buttons.forEach(button => button.classList.remove('selected'));
+        
+        element.classList.add('selected');
+        window.currentCategory = selectedCategory;
+        window.isLessonLearned = (selectedCategory === 'Lessons learned');
+    };
+    
+    window.submitCategory = function() {
+        if (!projetoSelecionado) {
+            alert("Por favor, selecione um projeto primeiro.");
+            return;
+        }
+        
+        if (!window.currentCategory) {
+            alert("Por favor, selecione uma categoria.");
+            return;
+        }
+        
+        addMessage(`Categoria: ${window.currentCategory}`, "user");
+        document.getElementById('categoria-step').classList.add('hidden');
+        
+        if (window.isLessonLearned) {
+            document.getElementById('subcategoria-step').classList.remove('hidden');
+            addMessage("Agora selecione a subcategoria desta Lesson Learned.", "bot");
+        } else {
+            document.getElementById('data-step').classList.remove('hidden');
+            addMessage("Agora informe a data da informação.", "bot");
+        }
+    };
+    
+    window.selectSubCategory = function(element, selectedSubCategory) {
+        const buttons = document.querySelectorAll('#subcategoria-step .option-button');
+        buttons.forEach(button => button.classList.remove('selected'));
+        
+        element.classList.add('selected');
+        window.currentSubCategory = selectedSubCategory;
+    };
+    
+    window.submitSubCategory = function() {
+        if (!window.currentSubCategory) {
+            alert("Por favor, selecione uma subcategoria.");
+            return;
+        }
+        
+        addMessage(`Subcategoria: ${window.currentSubCategory}`, "user");
+        document.getElementById('subcategoria-step').classList.add('hidden');
+        document.getElementById('data-step').classList.remove('hidden');
+        addMessage("Agora informe a data da informação.", "bot");
+    };
+    
+    window.submitDate = function() {
+        const dataInfo = document.getElementById('data-info').value;
+        if (!dataInfo) {
+            alert("Por favor, informe a data.");
+            return;
+        }
+        
+        addMessage(`Data: ${new Date(dataInfo).toLocaleString('pt-BR')}`, "user");
+        document.getElementById('data-step').classList.add('hidden');
+        document.getElementById('mensagem-step').classList.remove('hidden');
+        addMessage("Por fim, digite a informação que deseja registrar.", "bot");
+    };
+    
+    window.submitMessage = function() {
+        const mensagem = document.getElementById('mensagem').value.trim();
+        if (!mensagem) {
+            alert("Por favor, digite a informação.");
+            return;
+        }
+        
+        addMessage(`Informação: ${mensagem}`, "user");
+        addMessage("Processando e salvando a informação...", "bot");
+        
+        let categoriaFinal = window.currentCategory;
+        if (window.isLessonLearned) {
+            categoriaFinal = `Lessons learned - ${window.currentSubCategory}`;
+        }
+        
+        const lessonLearned = window.isLessonLearned ? 'sim' : 'não';
+        
+        fetch('/api/registrar_mensagem', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                projeto_id: projetoSelecionado.id,
+                categoria: categoriaFinal,
+                data_info: document.getElementById('data-info').value,
+                mensagem: mensagem,
+                lesson_learned: lessonLearned
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            const chatMessages = document.getElementById('chat-messages');
+            if (chatMessages.lastChild.textContent.includes("Processando")) {
+                chatMessages.removeChild(chatMessages.lastChild);
+            }
+            
+            if (data.success) {
+                const successMsg = window.isLessonLearned 
+                    ? "✅ Lesson Learned registrada com sucesso!" 
+                    : "✅ Informação registrada com sucesso!";
+                
+                addMessage(successMsg, "bot");
+                
+                // Resetar formulário
+                document.getElementById('mensagem').value = '';
+                document.querySelectorAll('.option-button').forEach(btn => btn.classList.remove('selected'));
+                document.getElementById('categoria-step').classList.remove('hidden');
+                document.getElementById('subcategoria-step').classList.add('hidden');
+                document.getElementById('data-step').classList.add('hidden');
+                document.getElementById('mensagem-step').classList.add('hidden');
+                
+                window.currentCategory = '';
+                window.currentSubCategory = '';
+                window.isLessonLearned = false;
+                
+                addMessage("Selecione a categoria para registrar nova informação.", "bot");
+            } else {
+                addMessage(`❌ Erro: ${data.message}`, "bot");
+            }
+        })
+        .catch(error => {
+            addMessage(`❌ Erro ao conectar com o servidor: ${error}`, "bot");
+        });
+    };
+    
+    function addMessage(text, sender) {
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message');
+        messageDiv.classList.add(sender === 'bot' ? 'bot-message' : 'user-message');
+        messageDiv.textContent = text;
+        
+        document.getElementById('chat-messages').appendChild(messageDiv);
+        document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight;
+    }
+</script>
+'''
+
+HTML_CONSULTA = '''
+<div class="chat-container">
+    <div id="chat-messages">
+        <div class="message bot-message">
+            Carregando...
+        </div>
+    </div>
+
+    <div class="input-group">
+        <input type="text" id="user-question" placeholder="Digite sua pergunta sobre os dados..." style="width: 100%; padding: 10px; margin-bottom: 10px;">
+        <button onclick="askQuestion()" style="width: 100%;">Enviar Pergunta</button>
+    </div>
+</div>
+
+<script>
+    function inicializarConsulta() {
+        const mensagemInicial = document.querySelector('#chat-messages .bot-message');
+        if (projetoSelecionado) {
+            mensagemInicial.textContent = 
+                `Olá! Sou seu assistente para consulta de informações do projeto ${projetoSelecionado.nome}. ` +
+                `Posso ajudar você a analisar os dados deste projeto. O que gostaria de saber?`;
+        } else {
+            mensagemInicial.textContent = 
+                'Olá! Sou seu assistente para consulta de informações do banco de dados. ' +
+                'Selecione um projeto no menu lateral para consultar dados específicos.';
+        }
+    }
+    
+    window.askQuestion = function() {
+        const question = document.getElementById('user-question').value.trim();
+        if (!question) {
+            alert('Por favor, digite uma pergunta.');
+            return;
+        }
+
+        addMessage(question, 'user');
+        document.getElementById('user-question').value = '';
+
+        const loadingId = addMessage('Analisando sua pergunta...', 'bot', true);
+
+        const projetoId = projetoSelecionado ? projetoSelecionado.id : null;
+
+        fetch('/api/consultar_dados', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ 
+                question: question,
+                projeto_id: projetoId
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            removeLoadingMessage(loadingId);
+
+            if (data.success) {
+                addMessage(data.answer, 'bot');
+            } else {
+                addMessage('❌ Erro: ' + data.message, 'bot');
+            }
+        })
+        .catch(error => {
+            removeLoadingMessage(loadingId);
+            addMessage('❌ Erro ao conectar com o servidor: ' + error, 'bot');
+        });
+    };
+
+    function addMessage(text, sender, isTemp = false) {
+        const chatMessages = document.getElementById('chat-messages');
+        const messageDiv = document.createElement('div');
+        messageDiv.classList.add('message');
+        messageDiv.classList.add(sender === 'bot' ? 'bot-message' : 'user-message');
+        
+        if (isTemp) {
+            messageDiv.classList.add('loading');
+            messageDiv.id = 'temp-' + Date.now();
+        }
+        
+        messageDiv.textContent = text;
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        
+        return isTemp ? messageDiv.id : null;
+    }
+
+    function removeLoadingMessage(id) {
+        const element = document.getElementById(id);
+        if (element) {
+            element.remove();
+        }
+    }
+</script>
+'''
+
+# ========== ROTAS ==========
 
 @app.route('/')
 def index():
@@ -456,7 +1155,9 @@ def index():
 def consulta():
     return HTML_BASE
 
-# ========== API ROUTES ==========
+@app.route('/health')
+def health_check():
+    return jsonify({'status': 'ok', 'message': 'Sistema funcionando'})
 
 @app.route('/api/projetos')
 def api_projetos():
@@ -582,36 +1283,14 @@ def consultar_dados():
     except Exception as e:
         return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
 
-@app.route('/api/ultimas_mensagens')
-def ultimas_mensagens():
+# Rota para servir arquivos estáticos
+@app.route('/static/<path:filename>')
+def serve_static(filename):
     try:
-        limite = request.args.get('limite', 10)
-        projeto_id = session.get('projeto_selecionado', {}).get('id')
-        
-        where_clause = f" WHERE projeto = '{projeto_id}'" if projeto_id else ""
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        query = f"SELECT * FROM mensagens{where_clause} ORDER BY timestamp DESC LIMIT {limite}"
-        cursor.execute(query)
-        
-        # Converter para lista de dicionários
-        columns = [description[0] for description in cursor.description]
-        mensagens = []
-        for row in cursor.fetchall():
-            mensagens.append(dict(zip(columns, row)))
-            
-        conn.close()
-        return jsonify({'success': True, 'mensagens': mensagens})
+        return send_from_directory(app.static_folder, filename)
     except Exception as e:
-        return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
-
-# ========== ROTA DE HEALTH CHECK ==========
-
-@app.route('/health')
-def health_check():
-    return jsonify({'status': 'ok', 'message': 'Sistema funcionando'})
-
-# ========== INICIALIZAÇÃO ==========
+        print(f"Erro ao servir arquivo estático {filename}: {e}")
+        return "Arquivo não encontrado", 404
 
 if __name__ == '__main__':
     # Inicializar o banco de dados
@@ -620,14 +1299,3 @@ if __name__ == '__main__':
     # No Render, use a porta fornecida pela variável de ambiente
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
-# ... (TODO O RESTO DO CÓDIGO DAS ROTAS API PERMANECE IGUAL)
-
-if __name__ == '__main__':
-    # Inicializar o banco de dados
-    inicializar_banco()
-    
-    # No Render, use a porta fornecida pela variável de ambiente
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
-
