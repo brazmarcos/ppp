@@ -1,5 +1,4 @@
-from flask import Flask, request, jsonify, session, send_file
-import sqlite3
+from flask import Flask, request, jsonify, session
 import pandas as pd
 import requests
 import json
@@ -12,20 +11,16 @@ import io
 import dropbox
 from dropbox.exceptions import AuthError, ApiError
 import threading
-import time
 
 # Configurações do Dropbox - usar variáveis de ambiente
 DROPBOX_ACCESS_TOKEN = os.getenv("DROPBOX_ACCESS_TOKEN", "seu_token_aqui")
-DROPBOX_DB_PATH = "/mensagens_projetos.db"
+DROPBOX_DB_PATH = "/mensagens_projetos.json"  # Mudamos para JSON
 
 # Configuração da API DeepSeek - usar variáveis de ambiente
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-3133a53daa7b44ccabd6805286671f6b")
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 
-# Configuração do banco de dados
-DB_NAME = "mensagens_projetos.db"
-
-# Inicializar Flask UMA ÚNICA VEZ
+# Inicializar Flask
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "sua_chave_secreta_aqui_producao_12345")
 
@@ -34,254 +29,217 @@ app.config['SESSION_COOKIE_SECURE'] = os.getenv('FLASK_ENV') == 'production'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
-def upload_db_to_dropbox():
-    """Faz upload do banco de dados para o Dropbox"""
-    try:
-        dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
-        
-        # Verifica se o token é válido
-        dbx.users_get_current_account()
-        
-        # Lê o arquivo do banco de dados
-        with open(DB_NAME, 'rb') as f:
-            # Faz upload do arquivo
-            dbx.files_upload(f.read(), DROPBOX_DB_PATH, mode=dropbox.files.WriteMode.overwrite)
-        
-        print("✅ Banco de dados salvo no Dropbox com sucesso!")
-        return True, "Backup salvo no Dropbox"
-        
-    except AuthError:
-        return False, "Erro de autenticação com o Dropbox"
-    except ApiError as e:
-        return False, f"Erro na API do Dropbox: {e}"
-    except Exception as e:
-        return False, f"Erro ao fazer upload: {e}"
+# Estrutura padrão do banco de dados
+DB_STRUCTURE = {
+    "mensagens": [],
+    "projetos": [],
+    "estatisticas": {
+        "total_mensagens": 0,
+        "ultima_atualizacao": None
+    }
+}
 
-def download_db_from_dropbox():
-    """Baixa o banco de dados do Dropbox"""
+def carregar_banco_dropbox():
+    """Carrega o banco de dados do Dropbox"""
     try:
         dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
         
         # Tenta baixar o arquivo
         metadata, response = dbx.files_download(DROPBOX_DB_PATH)
         
-        # Salva o arquivo localmente
-        with open(DB_NAME, 'wb') as f:
-            f.write(response.content)
-        
-        print("✅ Banco de dados restaurado do Dropbox com sucesso!")
-        return True, "Backup restaurado do Dropbox"
+        # Carrega o JSON
+        dados = json.loads(response.content.decode('utf-8'))
+        print("✅ Banco de dados carregado do Dropbox com sucesso!")
+        return dados
         
     except dropbox.exceptions.HttpError as e:
         if e.status == 409:  # Arquivo não encontrado
-            return False, "Arquivo de backup não encontrado no Dropbox"
+            print("📁 Arquivo não encontrado no Dropbox. Criando novo banco de dados...")
+            # Salva a estrutura inicial
+            salvar_banco_dropbox(DB_STRUCTURE)
+            return DB_STRUCTURE
         else:
-            return False, f"Erro HTTP: {e}"
+            print(f"❌ Erro HTTP ao carregar do Dropbox: {e}")
+            return DB_STRUCTURE
     except Exception as e:
-        return False, f"Erro ao baixar: {e}"
+        print(f"❌ Erro ao carregar do Dropbox: {e}")
+        return DB_STRUCTURE
 
-def automatic_backup():
-    """Faz backup automático após operações importantes"""
+def salvar_banco_dropbox(dados):
+    """Salva o banco de dados no Dropbox"""
     try:
-        success, message = upload_db_to_dropbox()
-        if success:
-            print("Backup automático realizado com sucesso!")
-        else:
-            print(f"Falha no backup automático: {message}")
-    except Exception as e:
-        print(f"Erro no backup automático: {e}")
-
-# Carregar projetos do CSV
-def carregar_projetos():
-    """Carrega a lista de projetos do arquivo CSV"""
-    try:
-        # Verificar se o arquivo existe
-        if not os.path.exists('projetos.csv'):
-            print("Arquivo projetos.csv não encontrado. Criando arquivo de exemplo...")
-            # Criar um arquivo de exemplo
-            projetos_exemplo = pd.DataFrame({
-                'ID': [1, 2, 3],
-                'Projeto': ['Projeto A', 'Projeto B', 'Projeto C']
-            })
-            projetos_exemplo.to_csv('projetos.csv', index=False)
-            print("Arquivo projetos.csv de exemplo criado.")
+        dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
         
-        projetos_df = pd.read_csv('projetos.csv')
-        projetos = []
-        for _, row in projetos_df.iterrows():
-            projetos.append({
-                'id': str(row['ID']),
-                'nome': row['Projeto'],
-                'display': f"{row['ID']} - {row['Projeto']}"
-            })
-        print(f"Projetos carregados: {len(projetos)}")
-        return projetos
+        # Converte para JSON
+        json_data = json.dumps(dados, ensure_ascii=False, indent=2)
+        
+        # Faz upload do arquivo
+        dbx.files_upload(
+            json_data.encode('utf-8'), 
+            DROPBOX_DB_PATH, 
+            mode=dropbox.files.WriteMode.overwrite
+        )
+        
+        print("✅ Banco de dados salvo no Dropbox com sucesso!")
+        return True
+        
     except Exception as e:
-        print(f"Erro ao carregar projetos do CSV: {e}")
-        # Retorna uma lista vazia se o arquivo não existir
+        print(f"❌ Erro ao salvar no Dropbox: {e}")
+        return False
+
+def carregar_projetos():
+    """Carrega a lista de projetos"""
+    try:
+        # Primeiro tenta carregar do Dropbox
+        banco = carregar_banco_dropbox()
+        
+        if banco.get("projetos"):
+            print(f"✅ Projetos carregados do Dropbox: {len(banco['projetos'])}")
+            return banco["projetos"]
+        
+        # Se não há projetos no Dropbox, cria a lista padrão
+        projetos_padrao = [
+            {'id': '1', 'nome': 'Projeto A', 'display': '1 - Projeto A'},
+            {'id': '2', 'nome': 'Projeto B', 'display': '2 - Projeto B'},
+            {'id': '3', 'nome': 'Projeto C', 'display': '3 - Projeto C'}
+        ]
+        
+        # Salva no Dropbox
+        banco["projetos"] = projetos_padrao
+        salvar_banco_dropbox(banco)
+        
+        print(f"✅ Projetos padrão criados: {len(projetos_padrao)}")
+        return projetos_padrao
+        
+    except Exception as e:
+        print(f"❌ Erro ao carregar projetos: {e}")
         return []
 
 class DBAnalyzer:
-    def __init__(self, api_key, db_file_path):
+    def __init__(self, api_key):
         self.api_key = api_key
-        self.db_file_path = db_file_path
         self.api_url = "https://api.deepseek.com/v1/chat/completions"
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
     
-    def extract_db_schema(self, projeto_id=None):
-        """Extrai o schema completo do banco de dados SQLite, opcionalmente filtrado por projeto"""
-        try:
-            conn = sqlite3.connect(self.db_file_path)
-            cursor = conn.cursor()
-            
-            # Obtém todas as tabelas
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            tables = cursor.fetchall()
-            
-            schema = "SCHEMA DO BANCO DE DADOS:\n\n"
-            
-            for table in tables:
-                table_name = table[0]
-                schema += f"TABELA: {table_name}\n"
-                
-                # Obtém a estrutura da tabela
-                cursor.execute(f"PRAGMA table_info({table_name})")
-                columns = cursor.fetchall()
-                
-                for column in columns:
-                    schema += f"  - {column[1]} ({column[2]})"
-                    if column[5] == 1:
-                        schema += " PRIMARY KEY"
-                    schema += "\n"
-                
-                schema += "\n"
-            
-            conn.close()
-            print(f"Schema do banco de dados extraído com sucesso: {self.db_file_path}")
-            return schema
-            
-        except Exception as e:
-            print(f"Erro ao extrair schema do banco de dados: {e}")
-            return ""
+    def extract_db_schema(self):
+        """Extrai o schema do banco de dados"""
+        schema = """
+        SCHEMA DO BANCO DE DADOS:
+
+        COLEÇÃO: mensagens
+        - id: identificador único
+        - timestamp: data e hora do registro
+        - remetente: quem enviou a mensagem
+        - categoria: categoria da informação
+        - contexto: contexto extraído da mensagem
+        - mudanca_chave: mudança chave identificada
+        - mensagem_original: texto original da mensagem
+        - projeto: ID do projeto relacionado
+        - lesson_learned: se é uma lesson learned ('sim' ou 'não')
+        - mensagem_hash: hash único para evitar duplicatas
+
+        COLEÇÃO: projetos
+        - id: ID do projeto
+        - nome: nome do projeto
+        - display: nome para exibição
+
+        COLEÇÃO: estatisticas
+        - total_mensagens: número total de mensagens
+        - ultima_atualizacao: data da última atualização
+        """
+        return schema
     
     def extract_data_samples(self, projeto_id=None):
-        """Extrai amostras de dados de cada tabela para análise, filtrado por projeto se especificado"""
+        """Extrai amostras de dados para análise"""
         try:
-            conn = sqlite3.connect(self.db_file_path)
-            cursor = conn.cursor()
+            banco = carregar_banco_dropbox()
+            mensagens = banco.get("mensagens", [])
             
-            # Obtém todas as tabelas
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-            tables = cursor.fetchall()
+            if projeto_id:
+                mensagens = [msg for msg in mensagens if msg.get("projeto") == projeto_id]
             
-            data_samples = "AMOSTRAS DE DADOS:\n\n"
+            data_samples = f"AMOSTRAS DE DADOS ({len(mensagens)} mensagens):\n\n"
             
-            for table in tables:
-                table_name = table[0]
-                
-                # Constrói a query com filtro de projeto se especificado
-                where_clause = f" WHERE projeto = '{projeto_id}'" if projeto_id else ""
-                query = f"SELECT * FROM {table_name}{where_clause} LIMIT 10"
-                
-                try:
-                    cursor.execute(query)
-                    rows = cursor.fetchall()
-                    
-                    # Obtém os nomes das colunas
-                    cursor.execute(f"PRAGMA table_info({table_name})")
-                    columns = [col[1] for col in cursor.fetchall()]
-                    
-                    if rows:
-                        data_samples += f"TABELA: {table_name}\n"
-                        data_samples += f"COLUNAS: {', '.join(columns)}\n"
-                        data_samples += f"DADOS ({len(rows)} linhas):\n"
-                        
-                        for row in rows:
-                            data_samples += f"  {row}\n"
-                        data_samples += "\n"
-                    else:
-                        data_samples += f"TABELA: {table_name} - SEM DADOS{'(para este projeto)' if projeto_id else ''}\n\n"
-                    
-                except Exception as e:
-                    # Algumas tabelas podem não ter dados ou serem de sistema
-                    data_samples += f"TABELA: {table_name} - ERRO AO ACESSAR: {e}\n\n"
-                    continue
+            for i, msg in enumerate(mensagens[:10]):  # Limita a 10 amostras
+                data_samples += f"MENSAGEM {i+1}:\n"
+                data_samples += f"  Projeto: {msg.get('projeto', 'N/A')}\n"
+                data_samples += f"  Categoria: {msg.get('categoria', 'N/A')}\n"
+                data_samples += f"  Contexto: {msg.get('contexto', 'N/A')}\n"
+                data_samples += f"  Mudança Chave: {msg.get('mudanca_chave', 'N/A')}\n"
+                data_samples += f"  Lesson Learned: {msg.get('lesson_learned', 'não')}\n"
+                data_samples += f"  Data: {msg.get('timestamp', 'N/A')}\n\n"
             
-            conn.close()
-            print(f"Amostras de dados extraídas com sucesso" + (f" para projeto {projeto_id}" if projeto_id else ""))
             return data_samples
             
         except Exception as e:
-            print(f"Erro ao extrair amostras de dados: {e}")
-            return ""
+            print(f"Erro ao extrair amostras: {e}")
+            return "Erro ao carregar amostras de dados"
     
-    def execute_query(self, query: str):
-        """Executa uma query SQL e retorna os resultados"""
+    def execute_query(self, query_type, filters=None):
+        """Executa consultas no banco de dados"""
         try:
-            conn = sqlite3.connect(self.db_file_path)
-            df = pd.read_sql_query(query, conn)
-            conn.close()
+            banco = carregar_banco_dropbox()
+            mensagens = banco.get("mensagens", [])
             
-            # Converte para formato mais legível
-            if not df.empty:
-                return df.to_dict('records')
-            else:
-                return []
+            if query_type == "count_total":
+                return len(mensagens)
+            
+            elif query_type == "count_by_category":
+                projeto_id = filters.get("projeto_id") if filters else None
+                mensagens_filtradas = mensagens
+                if projeto_id:
+                    mensagens_filtradas = [msg for msg in mensagens if msg.get("projeto") == projeto_id]
                 
+                categorias = {}
+                for msg in mensagens_filtradas:
+                    cat = msg.get("categoria", "Outros")
+                    categorias[cat] = categorias.get(cat, 0) + 1
+                
+                return [{"categoria": k, "count": v} for k, v in categorias.items()]
+            
+            elif query_type == "count_lessons_learned":
+                projeto_id = filters.get("projeto_id") if filters else None
+                mensagens_filtradas = mensagens
+                if projeto_id:
+                    mensagens_filtradas = [msg for msg in mensagens if msg.get("projeto") == projeto_id]
+                
+                count = sum(1 for msg in mensagens_filtradas if msg.get("lesson_learned") == "sim")
+                return count
+            
+            return None
+            
         except Exception as e:
-            print(f"Erro ao executar query: {e}")
-            return []
+            print(f"Erro na consulta: {e}")
+            return None
     
     def ask_question(self, question, projeto_id=None):
-        # Extrai schema e amostras filtradas pelo projeto
+        """Processa perguntas usando a API DeepSeek"""
+        # Extrai schema e amostras
         schema_content = self.extract_db_schema()
         data_samples = self.extract_data_samples(projeto_id)
         
         # Verifica se a pergunta requer consulta a dados específicos
         query_result = ""
         
-        # Adiciona filtro de projeto às consultas se especificado
-        where_clause = f" WHERE projeto = '{projeto_id}'" if projeto_id else ""
-        
-        # Exemplos de perguntas que podem requerer consultas específicas
-        if "quantas vezes" in question.lower() and "categoria" in question.lower():
-            # Tenta identificar a categoria específica
-            words = question.lower().split()
-            categoria = None
-            
-            for i, word in enumerate(words):
-                if word == "categoria" and i + 1 < len(words):
-                    categoria = words[i + 1]
-                    break
-            
-            if categoria:
-                query = f"SELECT COUNT(*) as count FROM mensagens WHERE categoria = '{categoria}'{where_clause}"
-                result = self.execute_query(query)
-                if result:
-                    query_result = f"\nRESULTADO DA CONSULTA: A categoria '{categoria}' aparece {result[0]['count']} vezes{(' no projeto selecionado' if projeto_id else '')}.\n"
-        
-        elif "quantas" in question.lower() and "mensagens" in question.lower():
-            query = f"SELECT COUNT(*) as total FROM mensagens{where_clause}"
-            result = self.execute_query(query)
-            if result:
-                query_result = f"\nRESULTADO DA CONSULTA: Existem {result[0]['total']} mensagens{(' neste projeto' if projeto_id else ' no total')}.\n"
+        if "quantas" in question.lower() and "mensagens" in question.lower():
+            count = self.execute_query("count_total", {"projeto_id": projeto_id})
+            if count is not None:
+                query_result = f"\nRESULTADO DA CONSULTA: Existem {count} mensagens{(' neste projeto' if projeto_id else ' no total')}.\n"
         
         elif "categorias" in question.lower() and "existem" in question.lower():
-            query = f"SELECT DISTINCT categoria, COUNT(*) as count FROM mensagens{where_clause} GROUP BY categoria ORDER BY count DESC"
-            result = self.execute_query(query)
-            if result:
+            categorias = self.execute_query("count_by_category", {"projeto_id": projeto_id})
+            if categorias:
                 query_result = f"\nRESULTADO DA CONSULTA: Distribuição por categorias{(' no projeto selecionado' if projeto_id else '')}:\n"
-                for item in result:
+                for item in categorias:
                     query_result += f"  - {item['categoria']}: {item['count']} mensagens\n"
         
         elif "lessons learned" in question.lower() or "lições aprendidas" in question.lower():
-            query = f"SELECT COUNT(*) as count FROM mensagens WHERE lesson_learned = 'sim'{where_clause}"
-            result = self.execute_query(query)
-            if result:
-                query_result = f"\nRESULTADO DA CONSULTA: Existem {result[0]['count']} Lessons Learned{(' neste projeto' if projeto_id else ' no total')}.\n"
+            count = self.execute_query("count_lessons_learned", {"projeto_id": projeto_id})
+            if count is not None:
+                query_result = f"\nRESULTADO DA CONSULTA: Existem {count} Lessons Learned{(' neste projeto' if projeto_id else ' no total')}.\n"
         
         # Prepara o prompt para a API
         projeto_info = f"\nPROJETO SELECIONADO: {projeto_id}\n" if projeto_id else ""
@@ -322,33 +280,6 @@ class DBAnalyzer:
         except KeyError:
             return "Erro: Resposta inesperada da API."
 
-def inicializar_banco():
-    """Inicializa o banco de dados com a tabela necessária"""
-    try:
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS mensagens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT NOT NULL,
-            remetente TEXT,
-            categoria TEXT NOT NULL,
-            contexto TEXT NOT NULL,
-            mudanca_chave TEXT NOT NULL,
-            mensagem_original TEXT NOT NULL,
-            projeto TEXT,
-            lesson_learned TEXT NOT NULL DEFAULT 'não',
-            mensagem_hash TEXT UNIQUE
-        )
-        ''')
-        
-        conn.commit()
-        conn.close()
-        print(f"✅ Banco de dados '{DB_NAME}' inicializado com sucesso!")
-    except Exception as e:
-        print(f"❌ Erro ao inicializar banco de dados: {e}")
-
 def gerar_hash_mensagem(projeto_id, categoria, mensagem):
     """Gera um hash único para a mensagem para evitar duplicatas"""
     conteudo = f"{projeto_id}_{categoria}_{mensagem}".lower().strip()
@@ -357,27 +288,23 @@ def gerar_hash_mensagem(projeto_id, categoria, mensagem):
 def verificar_duplicata(projeto_id, categoria, mensagem):
     """Verifica se já existe uma mensagem idêntica no banco de dados"""
     try:
+        banco = carregar_banco_dropbox()
+        mensagens = banco.get("mensagens", [])
+        
         mensagem_hash = gerar_hash_mensagem(projeto_id, categoria, mensagem)
         
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
+        for msg in mensagens:
+            if msg.get("mensagem_hash") == mensagem_hash:
+                return True
         
-        cursor.execute('''
-        SELECT COUNT(*) FROM mensagens WHERE mensagem_hash = ?
-        ''', (mensagem_hash,))
-        
-        count = cursor.fetchone()[0]
-        conn.close()
-        
-        return count > 0
+        return False
     except Exception as e:
         print(f"Erro ao verificar duplicata: {e}")
         return False
 
 def processar_contexto_mensagem(mensagem):
     """
-    Usa o DeepSeek APENAS para extrair o contexto e mudança chave da mensagem,
-    já que categoria e projeto já foram fornecidos pelo usuário
+    Usa o DeepSeek APENAS para extrair o contexto e mudança chave da mensagem
     """
     headers = {
         "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
@@ -442,10 +369,9 @@ def processar_contexto_mensagem(mensagem):
             "mudanca_chave": mensagem[:100] + "..." if len(mensagem) > 100 else mensagem
         }
 
-def salvar_no_banco(projeto_id, categoria, data_info, mensagem, lesson_learned):
+def salvar_mensagem(projeto_id, categoria, data_info, mensagem, lesson_learned):
     """
-    Salva os dados processados no banco de dados
-    Usa as informações do formulário diretamente para projeto e categoria
+    Salva os dados processados no Dropbox
     """
     # Verificar duplicata antes de processar
     if verificar_duplicata(projeto_id, categoria, mensagem):
@@ -457,71 +383,66 @@ def salvar_no_banco(projeto_id, categoria, data_info, mensagem, lesson_learned):
     # Gerar hash único para a mensagem
     mensagem_hash = gerar_hash_mensagem(projeto_id, categoria, mensagem)
     
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
     try:
-        cursor.execute('''
-        INSERT INTO mensagens (timestamp, remetente, categoria, contexto, mudanca_chave, mensagem_original, projeto, lesson_learned, mensagem_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            data_info,
-            None,  # Remetente não é coletado no formulário
-            categoria,  # Usa a categoria fornecida pelo usuário
-            dados_processados.get('contexto', ''),
-            dados_processados.get('mudanca_chave', ''),
-            mensagem,
-            projeto_id,  # Usa o projeto ID fornecido pelo usuário
-            lesson_learned,  # 'sim' ou 'não'
-            mensagem_hash
-        ))
+        # Carrega o banco atual
+        banco = carregar_banco_dropbox()
         
-        conn.commit()
-        conn.close()
-        print("Mensagem salva no banco de dados com sucesso!")
+        # Cria nova mensagem
+        nova_mensagem = {
+            "id": len(banco["mensagens"]) + 1,
+            "timestamp": data_info,
+            "remetente": None,
+            "categoria": categoria,
+            "contexto": dados_processados.get("contexto", ""),
+            "mudanca_chave": dados_processados.get("mudanca_chave", ""),
+            "mensagem_original": mensagem,
+            "projeto": projeto_id,
+            "lesson_learned": lesson_learned,
+            "mensagem_hash": mensagem_hash
+        }
         
-        # 🔥 BACKUP AUTOMÁTICO APÓS SALVAR
-        backup_thread = threading.Thread(target=automatic_backup)
-        backup_thread.start()
+        # Adiciona à lista
+        banco["mensagens"].append(nova_mensagem)
         
-        return True, "Informação registrada com sucesso!"
+        # Atualiza estatísticas
+        banco["estatisticas"]["total_mensagens"] = len(banco["mensagens"])
+        banco["estatisticas"]["ultima_atualizacao"] = datetime.now().isoformat()
         
-    except sqlite3.IntegrityError:
-        conn.close()
-        print("Tentativa de inserir mensagem duplicada")
-        return False, "Esta informação já foi registrada anteriormente."
+        # Salva no Dropbox
+        if salvar_banco_dropbox(banco):
+            print("✅ Mensagem salva no Dropbox com sucesso!")
+            return True, "Informação registrada com sucesso!"
+        else:
+            return False, "Erro ao salvar no banco de dados"
+        
     except Exception as e:
-        conn.close()
-        print(f"Erro ao salvar no banco: {e}")
+        print(f"Erro ao salvar mensagem: {e}")
         return False, f"Erro ao processar a mensagem: {str(e)}"
 
 def exportar_para_csv(projeto_id=None):
     """
-    Exporta dados do banco para CSV, opcionalmente filtrado por projeto
-    Retorna o caminho do arquivo CSV gerado
+    Exporta dados para CSV
     """
     try:
-        conn = sqlite3.connect(DB_NAME)
+        banco = carregar_banco_dropbox()
+        mensagens = banco.get("mensagens", [])
         
-        # Construir query com filtro de projeto se especificado
         if projeto_id:
-            query = "SELECT * FROM mensagens WHERE projeto = ? ORDER BY timestamp DESC"
-            df = pd.read_sql_query(query, conn, params=(projeto_id,))
+            mensagens = [msg for msg in mensagens if msg.get("projeto") == projeto_id]
             nome_arquivo = f"mensagens_projeto_{projeto_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         else:
-            query = "SELECT * FROM mensagens ORDER BY timestamp DESC"
-            df = pd.read_sql_query(query, conn)
             nome_arquivo = f"mensagens_completo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         
-        conn.close()
-        
-        if df.empty:
+        if not mensagens:
             return None, "Nenhum dado encontrado para exportar"
         
-        # Salvar arquivo temporário
+        # Converte para DataFrame
+        df = pd.DataFrame(mensagens)
+        
+        # Salva arquivo temporário
         df.to_csv(nome_arquivo, index=False, encoding='utf-8-sig')
         
-        return nome_arquivo, f"Exportação concluída: {len(df)} registros"
+        return nome_arquivo, f"Exportação concluída: {len(mensagens)} registros"
         
     except Exception as e:
         return None, f"Erro na exportação: {str(e)}"
@@ -531,29 +452,24 @@ def obter_estatisticas_banco(projeto_id=None):
     Obtém estatísticas do banco de dados
     """
     try:
-        conn = sqlite3.connect(DB_NAME)
+        banco = carregar_banco_dropbox()
+        mensagens = banco.get("mensagens", [])
         
-        where_clause = "WHERE projeto = ?" if projeto_id else ""
-        params = (projeto_id,) if projeto_id else ()
-        
-        # Total de registros
-        query_total = f"SELECT COUNT(*) as total FROM mensagens {where_clause}"
-        total = pd.read_sql_query(query_total, conn, params=params).iloc[0]['total']
+        if projeto_id:
+            mensagens = [msg for msg in mensagens if msg.get("projeto") == projeto_id]
         
         # Por categoria
-        query_cat = f"SELECT categoria, COUNT(*) as quantidade FROM mensagens {where_clause} GROUP BY categoria ORDER BY quantidade DESC"
-        df_cat = pd.read_sql_query(query_cat, conn, params=params)
+        categorias = {}
+        for msg in mensagens:
+            cat = msg.get("categoria", "Outros")
+            categorias[cat] = categorias.get(cat, 0) + 1
         
         # Lessons Learned
-        query_ll = f"SELECT COUNT(*) as count FROM mensagens WHERE lesson_learned = 'sim' {('AND projeto = ?' if projeto_id else '')}"
-        ll_params = (projeto_id,) if projeto_id else ()
-        lessons_learned = pd.read_sql_query(query_ll, conn, params=ll_params).iloc[0]['count']
-        
-        conn.close()
+        lessons_learned = sum(1 for msg in mensagens if msg.get("lesson_learned") == "sim")
         
         return {
-            'total': total,
-            'por_categoria': df_cat.to_dict('records'),
+            'total': len(mensagens),
+            'por_categoria': [{"categoria": k, "quantidade": v} for k, v in categorias.items()],
             'lessons_learned': lessons_learned,
             'projeto': projeto_id if projeto_id else 'Todos os projetos'
         }
@@ -561,17 +477,15 @@ def obter_estatisticas_banco(projeto_id=None):
     except Exception as e:
         return {'erro': str(e)}
 
-# Carregar projetos uma vez ao iniciar o aplicativo
+# Inicialização
 print("🔄 Inicializando aplicação...")
 PROJETOS = carregar_projetos()
 print("✅ Projetos carregados")
 
-# Inicializar banco de dados
-inicializar_banco()
-
-# Inicializar o analisador de banco de dados
-db_analyzer = DBAnalyzer(DEEPSEEK_API_KEY, DB_NAME)
+# Inicializar o analisador
+db_analyzer = DBAnalyzer(DEEPSEEK_API_KEY)
 print("✅ Analisador de banco de dados inicializado")
+
 
 # HTML para a página principal com seleção de projeto no menu
 HTML_BASE = '''
@@ -1771,33 +1685,27 @@ HTML_CONSULTA = '''
 </div>
 '''
 
-
 # Rotas
+@app.route('/')
+def index():
+    return HTML_BASE
+
 @app.route('/static/<path:filename>')
 def serve_static(filename):
-    """Servir arquivos estáticos"""
     try:
         static_dir = os.path.join(os.path.dirname(__file__), 'static')
         return send_from_directory(static_dir, filename)
-    except Exception as e:
-        print(f"Erro ao servir arquivo estático: {e}")
+    except:
         return "Arquivo não encontrado", 404
-
-@app.route('/')
-def index():
-    """Página principal"""
-    return HTML_BASE
 
 @app.route('/api/projetos')
 def api_projetos():
-    """API para retornar a lista de projetos"""
     try:
         return jsonify({
             'success': True, 
             'projetos': PROJETOS
         })
     except Exception as e:
-        print(f"Erro em /api/projetos: {e}")
         return jsonify({
             'success': False, 
             'message': f'Erro ao carregar projetos: {str(e)}'
@@ -1805,7 +1713,6 @@ def api_projetos():
 
 @app.route('/api/selecionar_projeto', methods=['POST'])
 def selecionar_projeto():
-    """API para selecionar um projeto na sessão"""
     try:
         data = request.get_json()
         projeto_id = data.get('projeto_id')
@@ -1814,7 +1721,6 @@ def selecionar_projeto():
             session.pop('projeto_selecionado', None)
             return jsonify({'success': True, 'projeto_nome': None})
         
-        # Encontrar o projeto na lista
         projeto = next((p for p in PROJETOS if p['id'] == projeto_id), None)
         
         if projeto:
@@ -1827,12 +1733,10 @@ def selecionar_projeto():
             return jsonify({'success': False, 'message': 'Projeto não encontrado'})
             
     except Exception as e:
-        print(f"Erro em /api/selecionar_projeto: {e}")
         return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
 
 @app.route('/api/conteudo/<pagina>')
 def api_conteudo(pagina):
-    """API para retornar o conteúdo das páginas"""
     try:
         projeto = session.get('projeto_selecionado')
         
@@ -1859,7 +1763,6 @@ def api_conteudo(pagina):
 
 @app.route('/api/verificar_duplicata', methods=['POST'])
 def api_verificar_duplicata():
-    """API para verificar se uma mensagem é duplicada"""
     try:
         data = request.get_json()
         projeto_id = data.get('projeto_id')
@@ -1888,9 +1791,7 @@ def registrar_mensagem():
         if not all([projeto_id, categoria, data_info, mensagem, lesson_learned]):
             return jsonify({'success': False, 'message': 'Todos os campos são obrigatórios'})
         
-        # Salvar no banco de dados (agora retorna tupla com sucesso e mensagem)
-        success, message = salvar_no_banco(projeto_id, categoria, data_info, mensagem, lesson_learned)
-        
+        success, message = salvar_mensagem(projeto_id, categoria, data_info, mensagem, lesson_learned)
         return jsonify({'success': success, 'message': message})
             
     except Exception as e:
@@ -1906,38 +1807,14 @@ def consultar_dados():
         if not question:
             return jsonify({'success': False, 'message': 'Pergunta não fornecida'})
         
-        # Usar o DBAnalyzer para processar a pergunta com filtro de projeto
         answer = db_analyzer.ask_question(question, projeto_id)
-        
         return jsonify({'success': True, 'answer': answer})
-        
-    except Exception as e:
-        return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
-
-# Novas rotas para exportação
-@app.route('/api/estatisticas', methods=['POST'])
-def api_estatisticas():
-    """API para obter estatísticas do banco de dados"""
-    try:
-        data = request.get_json()
-        projeto_id = data.get('projeto_id')
-        
-        estatisticas = obter_estatisticas_banco(projeto_id)
-        
-        if 'erro' in estatisticas:
-            return jsonify({'success': False, 'message': estatisticas['erro']})
-        
-        return jsonify({
-            'success': True,
-            'estatisticas': estatisticas
-        })
         
     except Exception as e:
         return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
 
 @app.route('/api/exportar_csv', methods=['POST'])
 def api_exportar_csv():
-    """API para exportar dados para CSV"""
     try:
         data = request.get_json()
         projeto_id = data.get('projeto_id')
@@ -1961,41 +1838,34 @@ def api_exportar_csv():
 
 @app.route('/api/download_csv/<filename>')
 def api_download_csv(filename):
-    """API para download do arquivo CSV"""
     try:
         return send_file(filename, as_attachment=True)
     except Exception as e:
         return jsonify({'success': False, 'message': f'Erro ao baixar arquivo: {str(e)}'})
-    
-@app.route('/api/fazer_backup', methods=['POST'])
-def api_fazer_backup():
-    """API para fazer backup na nuvem"""
-    try:
-        success, message = upload_db_to_dropbox()
-        return jsonify({'success': success, 'message': message})
-    except Exception as e:
-        return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
 
-@app.route('/api/restaurar_backup', methods=['POST'])
-def api_restaurar_backup():
-    """API para restaurar backup da nuvem"""
+@app.route('/api/estatisticas', methods=['POST'])
+def api_estatisticas():
     try:
-        success, message = download_db_from_dropbox()
-        return jsonify({'success': success, 'message': message})
+        data = request.get_json()
+        projeto_id = data.get('projeto_id')
+        
+        estatisticas = obter_estatisticas_banco(projeto_id)
+        
+        if 'erro' in estatisticas:
+            return jsonify({'success': False, 'message': estatisticas['erro']})
+        
+        return jsonify({
+            'success': True,
+            'estatisticas': estatisticas
+        })
+        
     except Exception as e:
         return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
 
 if __name__ == '__main__':
-    # Verificar se estamos em produção
     debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
     port = int(os.getenv('PORT', 5000))
     
     print(f"🚀 Iniciando servidor Flask na porta {port} (debug: {debug_mode})")
     
-    # Executar a aplicação Flask
-    app.run(
-        debug=debug_mode, 
-        host='0.0.0.0', 
-        port=port
-    )
-
+    app.run(debug=debug_mode, host='0.0.0.0', port=port)
