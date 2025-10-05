@@ -12,6 +12,7 @@ import io
 import dropbox
 from dropbox.exceptions import AuthError, ApiError
 import threading
+import time
 
 # Configurações do Dropbox - usar variáveis de ambiente
 DROPBOX_ACCESS_TOKEN = os.getenv("DROPBOX_ACCESS_TOKEN", "seu_token_aqui")
@@ -24,13 +25,12 @@ DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 # Configuração do banco de dados
 DB_NAME = "mensagens_projetos.db"
 
-# Resto do código permanece igual até a inicialização do Flask...
-
+# Inicializar Flask UMA ÚNICA VEZ
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "sua_chave_secreta_aqui_producao")
+app.secret_key = os.getenv("SECRET_KEY", "sua_chave_secreta_aqui_producao_12345")
 
 # Configurar para produção
-app.config['SESSION_COOKIE_SECURE'] = True  # Apenas HTTPS em produção
+app.config['SESSION_COOKIE_SECURE'] = os.getenv('FLASK_ENV') == 'production'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
@@ -82,26 +82,30 @@ def download_db_from_dropbox():
 
 def automatic_backup():
     """Faz backup automático após operações importantes"""
-    success, message = upload_db_to_dropbox()
-    if success:
-        print("Backup automático realizado com sucesso!")
-    else:
-        print(f"Falha no backup automático: {message}")
-
-app = Flask(__name__)
-app.secret_key = 'sua_chave_secreta_aqui'  # Necessário para usar sessions
-
-# Configuração da API DeepSeek
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-3133a53daa7b44ccabd6805286671f6b")
-DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
-
-# Configuração do banco de dados
-DB_NAME = "mensagens_projetos.db"
+    try:
+        success, message = upload_db_to_dropbox()
+        if success:
+            print("Backup automático realizado com sucesso!")
+        else:
+            print(f"Falha no backup automático: {message}")
+    except Exception as e:
+        print(f"Erro no backup automático: {e}")
 
 # Carregar projetos do CSV
 def carregar_projetos():
     """Carrega a lista de projetos do arquivo CSV"""
     try:
+        # Verificar se o arquivo existe
+        if not os.path.exists('projetos.csv'):
+            print("Arquivo projetos.csv não encontrado. Criando arquivo de exemplo...")
+            # Criar um arquivo de exemplo
+            projetos_exemplo = pd.DataFrame({
+                'ID': [1, 2, 3],
+                'Projeto': ['Projeto A', 'Projeto B', 'Projeto C']
+            })
+            projetos_exemplo.to_csv('projetos.csv', index=False)
+            print("Arquivo projetos.csv de exemplo criado.")
+        
         projetos_df = pd.read_csv('projetos.csv')
         projetos = []
         for _, row in projetos_df.iterrows():
@@ -320,27 +324,30 @@ class DBAnalyzer:
 
 def inicializar_banco():
     """Inicializa o banco de dados com a tabela necessária"""
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS mensagens (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        timestamp TEXT NOT NULL,
-        remetente TEXT,
-        categoria TEXT NOT NULL,
-        contexto TEXT NOT NULL,
-        mudanca_chave TEXT NOT NULL,
-        mensagem_original TEXT NOT NULL,
-        projeto TEXT,
-        lesson_learned TEXT NOT NULL DEFAULT 'não',
-        mensagem_hash TEXT UNIQUE
-    )
-    ''')
-    
-    conn.commit()
-    conn.close()
-    print(f"Banco de dados '{DB_NAME}' inicializado com sucesso!")
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS mensagens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            remetente TEXT,
+            categoria TEXT NOT NULL,
+            contexto TEXT NOT NULL,
+            mudanca_chave TEXT NOT NULL,
+            mensagem_original TEXT NOT NULL,
+            projeto TEXT,
+            lesson_learned TEXT NOT NULL DEFAULT 'não',
+            mensagem_hash TEXT UNIQUE
+        )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        print(f"✅ Banco de dados '{DB_NAME}' inicializado com sucesso!")
+    except Exception as e:
+        print(f"❌ Erro ao inicializar banco de dados: {e}")
 
 def gerar_hash_mensagem(projeto_id, categoria, mensagem):
     """Gera um hash único para a mensagem para evitar duplicatas"""
@@ -349,19 +356,23 @@ def gerar_hash_mensagem(projeto_id, categoria, mensagem):
 
 def verificar_duplicata(projeto_id, categoria, mensagem):
     """Verifica se já existe uma mensagem idêntica no banco de dados"""
-    mensagem_hash = gerar_hash_mensagem(projeto_id, categoria, mensagem)
-    
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-    SELECT COUNT(*) FROM mensagens WHERE mensagem_hash = ?
-    ''', (mensagem_hash,))
-    
-    count = cursor.fetchone()[0]
-    conn.close()
-    
-    return count > 0
+    try:
+        mensagem_hash = gerar_hash_mensagem(projeto_id, categoria, mensagem)
+        
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT COUNT(*) FROM mensagens WHERE mensagem_hash = ?
+        ''', (mensagem_hash,))
+        
+        count = cursor.fetchone()[0]
+        conn.close()
+        
+        return count > 0
+    except Exception as e:
+        print(f"Erro ao verificar duplicata: {e}")
+        return False
 
 def processar_contexto_mensagem(mensagem):
     """
@@ -551,7 +562,16 @@ def obter_estatisticas_banco(projeto_id=None):
         return {'erro': str(e)}
 
 # Carregar projetos uma vez ao iniciar o aplicativo
+print("🔄 Inicializando aplicação...")
 PROJETOS = carregar_projetos()
+print("✅ Projetos carregados")
+
+# Inicializar banco de dados
+inicializar_banco()
+
+# Inicializar o analisador de banco de dados
+db_analyzer = DBAnalyzer(DEEPSEEK_API_KEY, DB_NAME)
+print("✅ Analisador de banco de dados inicializado")
 
 # HTML para a página principal com seleção de projeto no menu
 HTML_BASE = '''
@@ -1752,21 +1772,22 @@ HTML_CONSULTA = '''
 '''
 
 
-# Adicione esta rota para servir arquivos estáticos
+# Rotas
 @app.route('/static/<path:filename>')
 def serve_static(filename):
-    # No Render, os arquivos estáticos devem estar no diretório do projeto
-    static_dir = os.path.join(os.path.dirname(__file__), 'static')
-    return send_from_directory(static_dir, filename)
-
-# Inicializar o analisador de banco de dados
-db_analyzer = DBAnalyzer(DEEPSEEK_API_KEY, DB_NAME)
+    """Servir arquivos estáticos"""
+    try:
+        static_dir = os.path.join(os.path.dirname(__file__), 'static')
+        return send_from_directory(static_dir, filename)
+    except Exception as e:
+        print(f"Erro ao servir arquivo estático: {e}")
+        return "Arquivo não encontrado", 404
 
 @app.route('/')
 def index():
+    """Página principal"""
     return HTML_BASE
 
-# API Routes
 @app.route('/api/projetos')
 def api_projetos():
     """API para retornar a lista de projetos"""
@@ -1776,6 +1797,7 @@ def api_projetos():
             'projetos': PROJETOS
         })
     except Exception as e:
+        print(f"Erro em /api/projetos: {e}")
         return jsonify({
             'success': False, 
             'message': f'Erro ao carregar projetos: {str(e)}'
@@ -1805,6 +1827,7 @@ def selecionar_projeto():
             return jsonify({'success': False, 'message': 'Projeto não encontrado'})
             
     except Exception as e:
+        print(f"Erro em /api/selecionar_projeto: {e}")
         return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
 
 @app.route('/api/conteudo/<pagina>')
@@ -1963,15 +1986,16 @@ def api_restaurar_backup():
         return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
 
 if __name__ == '__main__':
-    # Inicializar o banco de dados
-    inicializar_banco()
-    
     # Verificar se estamos em produção
     debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+    port = int(os.getenv('PORT', 5000))
+    
+    print(f"🚀 Iniciando servidor Flask na porta {port} (debug: {debug_mode})")
     
     # Executar a aplicação Flask
     app.run(
         debug=debug_mode, 
         host='0.0.0.0', 
-        port=int(os.getenv('PORT', 5000))
+        port=port
     )
+
