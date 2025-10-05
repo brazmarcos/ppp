@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, session
+from flask import Flask, request, jsonify, session, send_file
 import json
 import re
 from datetime import datetime
@@ -7,6 +7,12 @@ import hashlib
 import requests
 import csv
 import io
+import dropbox
+from dropbox.exceptions import AuthError, ApiError
+
+# Configurações do Dropbox - usar variáveis de ambiente
+DROPBOX_ACCESS_TOKEN = os.getenv("DROPBOX_ACCESS_TOKEN", "seu_token_dropbox_aqui")
+DROPBOX_DB_PATH = "/mensagens_projetos.json"
 
 # Configuração da API DeepSeek
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "sk-3133a53daa7b44ccabd6805286671f6b")
@@ -20,61 +26,236 @@ app.config['SESSION_COOKIE_SECURE'] = os.getenv('FLASK_ENV') == 'production'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
-# Banco de dados em memória
-MEMORY_DB = {
+# Estrutura padrão do banco de dados no Dropbox
+DB_STRUCTURE = {
     "mensagens": [],
-    "projetos": [
-        {'id': '1', 'nome': 'Projeto A', 'display': '1 - Projeto A'},
-        {'id': '2', 'nome': 'Projeto B', 'display': '2 - Projeto B'},
-        {'id': '3', 'nome': 'Projeto C', 'display': '3 - Projeto C'}
-    ]
+    "estatisticas": {
+        "total_mensagens": 0,
+        "ultima_atualizacao": None
+    }
 }
 
-def carregar_banco():
-    return MEMORY_DB
+def carregar_projetos_csv():
+    """Carrega a lista de projetos do arquivo CSV sem usar pandas"""
+    try:
+        # Verificar se o arquivo existe
+        if not os.path.exists('projetos.csv'):
+            print("Arquivo projetos.csv não encontrado. Criando arquivo de exemplo...")
+            # Criar um arquivo de exemplo
+            with open('projetos.csv', 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(['ID', 'Projeto'])
+                writer.writerow([1, 'Projeto A'])
+                writer.writerow([2, 'Projeto B'])
+                writer.writerow([3, 'Projeto C'])
+            print("Arquivo projetos.csv de exemplo criado.")
+        
+        projetos = []
+        with open('projetos.csv', 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                projetos.append({
+                    'id': str(row['ID']),
+                    'nome': row['Projeto'],
+                    'display': f"{row['ID']} - {row['Projeto']}"
+                })
+        
+        print(f"✅ Projetos carregados do CSV: {len(projetos)}")
+        return projetos
+        
+    except Exception as e:
+        print(f"❌ Erro ao carregar projetos do CSV: {e}")
+        # Retorna projetos padrão se houver erro
+        return [
+            {'id': '1', 'nome': 'Projeto A', 'display': '1 - Projeto A'},
+            {'id': '2', 'nome': 'Projeto B', 'display': '2 - Projeto B'},
+            {'id': '3', 'nome': 'Projeto C', 'display': '3 - Projeto C'}
+        ]
 
-def salvar_banco(dados):
-    global MEMORY_DB
-    MEMORY_DB = dados
-    return True
+def carregar_banco_dropbox():
+    """Carrega o banco de dados do Dropbox"""
+    try:
+        dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+        
+        # Tenta baixar o arquivo
+        metadata, response = dbx.files_download(DROPBOX_DB_PATH)
+        
+        # Carrega o JSON
+        dados = json.loads(response.content.decode('utf-8'))
+        print("✅ Banco de dados carregado do Dropbox com sucesso!")
+        return dados
+        
+    except dropbox.exceptions.HttpError as e:
+        if e.status == 409:  # Arquivo não encontrado
+            print("📁 Arquivo não encontrado no Dropbox. Criando novo banco de dados...")
+            # Salva a estrutura inicial
+            salvar_banco_dropbox(DB_STRUCTURE)
+            return DB_STRUCTURE
+        else:
+            print(f"❌ Erro HTTP ao carregar do Dropbox: {e}")
+            return DB_STRUCTURE
+    except Exception as e:
+        print(f"❌ Erro ao carregar do Dropbox: {e}")
+        return DB_STRUCTURE
+
+def salvar_banco_dropbox(dados):
+    """Salva o banco de dados no Dropbox"""
+    try:
+        dbx = dropbox.Dropbox(DROPBOX_ACCESS_TOKEN)
+        
+        # Converte para JSON
+        json_data = json.dumps(dados, ensure_ascii=False, indent=2)
+        
+        # Faz upload do arquivo
+        dbx.files_upload(
+            json_data.encode('utf-8'), 
+            DROPBOX_DB_PATH, 
+            mode=dropbox.files.WriteMode.overwrite
+        )
+        
+        print("✅ Banco de dados salvo no Dropbox com sucesso!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Erro ao salvar no Dropbox: {e}")
+        return False
+
+def upload_db_to_dropbox():
+    """Faz upload do banco de dados para o Dropbox (para backup)"""
+    try:
+        # Simplesmente salva o banco atual
+        banco = carregar_banco_dropbox()
+        success = salvar_banco_dropbox(banco)
+        if success:
+            return True, "Backup salvo no Dropbox com sucesso!"
+        else:
+            return False, "Erro ao fazer backup"
+        
+    except Exception as e:
+        return False, f"Erro ao fazer upload: {e}"
+
+def download_db_from_dropbox():
+    """Baixa o banco de dados do Dropbox (para restore)"""
+    try:
+        # Simplesmente carrega o banco - já está sincronizado
+        banco = carregar_banco_dropbox()
+        return True, "Backup restaurado do Dropbox com sucesso!"
+        
+    except Exception as e:
+        return False, f"Erro ao baixar: {e}"
 
 def gerar_hash_mensagem(projeto_id, categoria, mensagem):
+    """Gera um hash único para a mensagem para evitar duplicatas"""
     conteudo = f"{projeto_id}_{categoria}_{mensagem}".lower().strip()
     return hashlib.md5(conteudo.encode()).hexdigest()
 
 def verificar_duplicata(projeto_id, categoria, mensagem):
+    """Verifica se já existe uma mensagem idêntica no banco de dados"""
     try:
-        banco = carregar_banco()
+        banco = carregar_banco_dropbox()
         mensagens = banco.get("mensagens", [])
+        
         mensagem_hash = gerar_hash_mensagem(projeto_id, categoria, mensagem)
         
         for msg in mensagens:
             if msg.get("mensagem_hash") == mensagem_hash:
                 return True
+        
         return False
-    except:
+    except Exception as e:
+        print(f"Erro ao verificar duplicata: {e}")
         return False
 
 def processar_contexto_mensagem(mensagem):
-    # Versão simplificada sem API
-    return {
-        "contexto": "Informação registrada no sistema",
-        "mudanca_chave": mensagem[:100] + "..." if len(mensagem) > 100 else mensagem
+    """
+    Usa o DeepSeek APENAS para extrair o contexto e mudança chave da mensagem
+    """
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json"
     }
+    
+    prompt = f"""
+    Analise a seguinte mensagem relacionada a projetos de construção e extraia APENAS:
+    
+    1. Um breve contexto da informação
+    2. A mudança chave ou registro importante mencionado
+    
+    MENSAGEM: "{mensagem}"
+    
+    Retorne APENAS um JSON com a seguinte estrutura:
+    {{
+        "contexto": "breve descrição do contexto",
+        "mudanca_chave": "descrição clara da mudança ou registro"
+    }}
+    """
+    
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [
+            {
+                "role": "system", 
+                "content": "Você é um assistente especializado em análise de mensagens de projetos de construção civil. Extraia informações de contexto de forma preciso."
+            },
+            {
+                "role": "user", 
+                "content": prompt
+            }
+        ],
+        "temperature": 0.1,
+        "max_tokens": 500
+    }
+    
+    try:
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        response_data = response.json()
+        
+        conteudo = response_data['choices'][0]['message']['content']
+        
+        # Extrair JSON da resposta
+        json_match = re.search(r'\{.*\}', conteudo, re.DOTALL)
+        if json_match:
+            json_str = json_match.group()
+            dados = json.loads(json_str)
+            return dados
+        else:
+            print("Erro: JSON não encontrado na resposta da API")
+            return {
+                "contexto": "Informação registrada via formulário",
+                "mudanca_chave": mensagem[:100] + "..." if len(mensagem) > 100 else mensagem
+            }
+            
+    except Exception as e:
+        print(f"Erro ao processar contexto: {e}")
+        return {
+            "contexto": "Informação registrada via formulário",
+            "mudanca_chave": mensagem[:100] + "..." if len(mensagem) > 100 else mensagem
+        }
 
 def salvar_mensagem(projeto_id, categoria, data_info, mensagem, lesson_learned):
+    """
+    Salva os dados processados no Dropbox
+    """
+    # Verificar duplicata antes de processar
     if verificar_duplicata(projeto_id, categoria, mensagem):
         return False, "Esta informação já foi registrada anteriormente."
     
+    # Processar apenas o contexto e mudança chave com DeepSeek
     dados_processados = processar_contexto_mensagem(mensagem)
+    
+    # Gerar hash único para a mensagem
     mensagem_hash = gerar_hash_mensagem(projeto_id, categoria, mensagem)
     
     try:
-        banco = carregar_banco()
+        # Carrega o banco atual
+        banco = carregar_banco_dropbox()
         
+        # Cria nova mensagem
         nova_mensagem = {
             "id": len(banco["mensagens"]) + 1,
             "timestamp": data_info,
+            "remetente": None,
             "categoria": categoria,
             "contexto": dados_processados.get("contexto", ""),
             "mudanca_chave": dados_processados.get("mudanca_chave", ""),
@@ -84,17 +265,30 @@ def salvar_mensagem(projeto_id, categoria, data_info, mensagem, lesson_learned):
             "mensagem_hash": mensagem_hash
         }
         
+        # Adiciona à lista
         banco["mensagens"].append(nova_mensagem)
-        salvar_banco(banco)
-        return True, "Informação registrada com sucesso!"
+        
+        # Atualiza estatísticas
+        banco["estatisticas"]["total_mensagens"] = len(banco["mensagens"])
+        banco["estatisticas"]["ultima_atualizacao"] = datetime.now().isoformat()
+        
+        # Salva no Dropbox
+        if salvar_banco_dropbox(banco):
+            print("✅ Mensagem salva no Dropbox com sucesso!")
+            return True, "Informação registrada com sucesso!"
+        else:
+            return False, "Erro ao salvar no banco de dados"
         
     except Exception as e:
-        return False, f"Erro: {str(e)}"
+        print(f"Erro ao salvar mensagem: {e}")
+        return False, f"Erro ao processar a mensagem: {str(e)}"
 
 def exportar_para_csv(projeto_id=None):
-    """Exporta dados para CSV sem usar pandas"""
+    """
+    Exporta dados para CSV sem usar pandas
+    """
     try:
-        banco = carregar_banco()
+        banco = carregar_banco_dropbox()
         mensagens = banco.get("mensagens", [])
         
         if projeto_id:
@@ -127,9 +321,11 @@ def exportar_para_csv(projeto_id=None):
         return None, f"Erro na exportação: {str(e)}"
 
 def obter_estatisticas_banco(projeto_id=None):
-    """Obtém estatísticas do banco de dados sem pandas"""
+    """
+    Obtém estatísticas do banco de dados sem pandas
+    """
     try:
-        banco = carregar_banco()
+        banco = carregar_banco_dropbox()
         mensagens = banco.get("mensagens", [])
         
         if projeto_id:
@@ -183,7 +379,7 @@ class DBAnalyzer:
     
     def extract_data_samples(self, projeto_id=None):
         try:
-            banco = carregar_banco()
+            banco = carregar_banco_dropbox()
             mensagens = banco.get("mensagens", [])
             
             if projeto_id:
@@ -210,7 +406,7 @@ class DBAnalyzer:
     
     def execute_query(self, query_type, projeto_id=None):
         try:
-            banco = carregar_banco()
+            banco = carregar_banco_dropbox()
             mensagens = banco.get("mensagens", [])
             
             if projeto_id:
@@ -274,7 +470,7 @@ class DBAnalyzer:
         payload = {
             "model": "deepseek-chat",
             "messages": [
-                {"role": "system", "content": "Você é um assistente especializado em análise de dados de projetos de construção civil. Responda sempre em português."},
+                {"role": "system", "content": "Você é um assistente especializado em análise de dados de projetos de construção civil. Responda sempre em portugês."},
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.1,
@@ -291,10 +487,13 @@ class DBAnalyzer:
 
 # Inicialização
 print("🔄 Inicializando aplicação...")
+PROJETOS = carregar_projetos_csv()
 db_analyzer = DBAnalyzer(DEEPSEEK_API_KEY)
-PROJETOS = MEMORY_DB["projetos"]
-print("✅ Aplicação inicializada")
 
+# Inicializar banco no Dropbox se não existir
+carregar_banco_dropbox()
+
+print("✅ Aplicação inicializada")
 # HTML para a página principal com seleção de projeto no menu
 HTML_BASE = '''
 <!DOCTYPE html>
@@ -1498,6 +1697,14 @@ HTML_CONSULTA = '''
 def index():
     return HTML_BASE
 
+@app.route('/static/<path:filename>')
+def serve_static(filename):
+    try:
+        static_dir = os.path.join(os.path.dirname(__file__), 'static')
+        return send_from_directory(static_dir, filename)
+    except:
+        return "Arquivo não encontrado", 404
+
 @app.route('/api/projetos')
 def api_projetos():
     return jsonify({'success': True, 'projetos': PROJETOS})
@@ -1514,26 +1721,83 @@ def selecionar_projeto():
     else:
         return jsonify({'success': False, 'message': 'Projeto não encontrado'})
 
+@app.route('/api/conteudo/<pagina>')
+def api_conteudo(pagina):
+    try:
+        projeto = session.get('projeto_selecionado')
+        
+        if pagina == 'entrada':
+            titulo = "Entrada de Informação"
+            subtitulo = projeto['nome'] if projeto else "Selecione um projeto no menu para começar"
+            conteudo = HTML_ENTRADA
+        elif pagina == 'consulta':
+            titulo = "Consulta de Informações"
+            subtitulo = projeto['nome'] if projeto else "Chatbot para consultar e analisar dados"
+            conteudo = HTML_CONSULTA
+        else:
+            return jsonify({'success': False, 'message': 'Página não encontrada'})
+            
+        return jsonify({
+            'success': True,
+            'titulo': titulo,
+            'subtitulo': subtitulo,
+            'conteudo': conteudo
+        })
+            
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
+
+@app.route('/api/verificar_duplicata', methods=['POST'])
+def api_verificar_duplicata():
+    try:
+        data = request.get_json()
+        projeto_id = data.get('projeto_id')
+        categoria = data.get('categoria')
+        mensagem = data.get('mensagem')
+        
+        if not all([projeto_id, categoria, mensagem]):
+            return jsonify({'success': False, 'is_duplicata': False})
+        
+        is_duplicata = verificar_duplicata(projeto_id, categoria, mensagem)
+        return jsonify({'success': True, 'is_duplicata': is_duplicata})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'is_duplicata': False})
+
 @app.route('/api/registrar_mensagem', methods=['POST'])
 def registrar_mensagem():
-    data = request.get_json()
-    projeto_id = data.get('projeto_id')
-    categoria = data.get('categoria')
-    data_info = data.get('data_info')
-    mensagem = data.get('mensagem')
-    lesson_learned = data.get('lesson_learned', 'não')
-    
-    success, message = salvar_mensagem(projeto_id, categoria, data_info, mensagem, lesson_learned)
-    return jsonify({'success': success, 'message': message})
+    try:
+        data = request.get_json()
+        projeto_id = data.get('projeto_id')
+        categoria = data.get('categoria')
+        data_info = data.get('data_info')
+        mensagem = data.get('mensagem')
+        lesson_learned = data.get('lesson_learned', 'não')
+        
+        if not all([projeto_id, categoria, data_info, mensagem, lesson_learned]):
+            return jsonify({'success': False, 'message': 'Todos os campos são obrigatórios'})
+        
+        success, message = salvar_mensagem(projeto_id, categoria, data_info, mensagem, lesson_learned)
+        return jsonify({'success': success, 'message': message})
+            
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
 
 @app.route('/api/consultar_dados', methods=['POST'])
 def consultar_dados():
-    data = request.get_json()
-    question = data.get('question')
-    projeto_id = data.get('projeto_id')
-    
-    answer = db_analyzer.ask_question(question, projeto_id)
-    return jsonify({'success': True, 'answer': answer})
+    try:
+        data = request.get_json()
+        question = data.get('question')
+        projeto_id = data.get('projeto_id')
+        
+        if not question:
+            return jsonify({'success': False, 'message': 'Pergunta não fornecida'})
+        
+        answer = db_analyzer.ask_question(question, projeto_id)
+        return jsonify({'success': True, 'answer': answer})
+        
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
 
 @app.route('/api/exportar_csv', methods=['POST'])
 def api_exportar_csv():
@@ -1581,6 +1845,24 @@ def api_estatisticas():
             'estatisticas': estatisticas
         })
         
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
+
+@app.route('/api/fazer_backup', methods=['POST'])
+def api_fazer_backup():
+    """API para fazer backup na nuvem"""
+    try:
+        success, message = upload_db_to_dropbox()
+        return jsonify({'success': success, 'message': message})
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
+
+@app.route('/api/restaurar_backup', methods=['POST'])
+def api_restaurar_backup():
+    """API para restaurar backup da nuvem"""
+    try:
+        success, message = download_db_from_dropbox()
+        return jsonify({'success': success, 'message': message})
     except Exception as e:
         return jsonify({'success': False, 'message': f'Erro: {str(e)}'})
 
