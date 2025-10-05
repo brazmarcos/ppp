@@ -295,7 +295,7 @@ db_analyzer = DBAnalyzer(DEEPSEEK_API_KEY)
 PROJETOS = MEMORY_DB["projetos"]
 print("✅ Aplicação inicializada")
 
-# HTML simplificado
+# HTML para a página principal com seleção de projeto no menu
 HTML_BASE = '''
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -304,206 +304,424 @@ HTML_BASE = '''
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pergunta pra Pinho</title>
     <style>
-        body { 
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
-            margin: 0; 
-            padding: 0; 
-            background: #f5f5f5; 
-            color: #333; 
-        }
-        .container { 
-            max-width: 1200px; 
-            margin: 0 auto; 
-            padding: 20px; 
-        }
-        .header { 
-            background: #2c3e50; 
-            color: white; 
-            padding: 30px; 
-            border-radius: 10px; 
-            text-align: center; 
-            margin-bottom: 20px;
-        }
-        .card { 
-            background: white; 
-            padding: 25px; 
-            margin: 20px 0; 
-            border-radius: 10px; 
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        .message { 
-            margin: 15px 0; 
-            padding: 15px; 
-            border-radius: 8px; 
-            border-left: 4px solid;
-        }
-        .user { 
-            background: #e8f5e8; 
-            border-left-color: #2ecc71;
-            text-align: right;
-        }
-        .bot { 
-            background: #e8f4f8; 
-            border-left-color: #3498db;
-        }
-        input, textarea, select { 
-            width: 100%; 
-            padding: 12px; 
-            margin: 8px 0; 
-            border: 1px solid #ddd; 
-            border-radius: 5px; 
-            box-sizing: border-box;
-        }
-        button { 
-            background: #3498db; 
-            color: white; 
-            border: none; 
-            padding: 12px 25px; 
-            border-radius: 5px; 
-            cursor: pointer; 
-            font-size: 16px;
-            margin: 5px;
-        }
-        button:hover { 
-            background: #2980b9; 
-        }
-        .button-group {
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            color: #333;
             display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin: 15px 0;
         }
-        .projeto-info {
-            background: #27ae60;
+        .sidebar {
+            width: 250px;
+            background-color: #2c3e50;
             color: white;
-            padding: 15px;
-            border-radius: 5px;
-            margin: 15px 0;
+            height: 100vh;
+            padding: 20px;
+            position: fixed;
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar-content {
+            flex: 1;
+        }
+        .sidebar h2 {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .sidebar nav ul {
+            list-style: none;
+            padding: 0;
+            margin-bottom: 30px;
+        }
+        .sidebar nav ul li {
+            margin-bottom: 10px;
+        }
+        .sidebar nav ul li a {
+            color: white;
+            text-decoration: none;
+            padding: 10px 15px;
+            display: block;
+            border-radius: 4px;
+            transition: background-color 0.3s;
+        }
+        .sidebar nav ul li a:hover {
+            background-color: #34495e;
+        }
+        .sidebar nav ul li a.active {
+            background-color: #3498db;
+        }
+        .projeto-selecionado {
+            background-color: #27ae60;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
             text-align: center;
         }
-        .no-projeto {
-            background: #e74c3c;
-            color: white;
-            padding: 15px;
-            border-radius: 5px;
-            margin: 15px 0;
+        .projeto-nao-selecionado {
+            background-color: #e74c3c;
+            padding: 10px;
+            border-radius: 4px;
+            margin-bottom: 20px;
             text-align: center;
         }
-        .chat-container {
-            max-height: 400px;
-            overflow-y: auto;
-            border: 1px solid #ddd;
-            padding: 15px;
+        .select-projeto {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 15px;
+            border-radius: 4px;
+            border: none;
+        }
+        .sidebar-image {
+            margin-top: auto;
+            text-align: center;
+            padding: 10px 0;
+            border-top: 1px solid #34495e;
+        }
+        .sidebar-image img {
+            max-width: 100%;
+            height: auto;
             border-radius: 5px;
-            margin: 15px 0;
+            display: block;
+            margin: 0 auto;
         }
         .export-section {
-            background: #34495e;
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #34495e;
+            border-radius: 5px;
+        }
+        .export-section h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }
+        .export-buttons {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .export-button {
+            padding: 8px 12px;
+            background-color: #3498db;
             color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background-color 0.3s;
+        }
+        .export-button:hover {
+            background-color: #2980b9;
+        }
+        .export-button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        .main-content {
+            margin-left: 250px;
+            padding: 20px;
+            width: calc(100% - 250px);
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 20px;
+            text-align: center;
+            border-radius: 5px 5px 0 0;
+        }
+        .chat-container {
+            background-color: white;
+            border-radius: 0 0 5px 5px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .bot-message {
+            background-color: #e8f4f8;
+            border-left: 4px solid #3498db;
+        }
+        .user-message {
+            background-color: #f0f7f0;
+            border-left: 4px solid #2ecc71;
+            text-align: right;
+        }
+        .input-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input, select, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        button.processing {
+            background-color: #f39c12;
+            cursor: not-allowed;
+        }
+        .hidden {
+            display: none;
+        }
+        .option-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        .option-button {
+            padding: 10px 15px;
+            background-color: #ecf0f1;
+            border: 1px solid #bdc3c7;
+            border-radius: 4px;
+            cursor: pointer;
+            text-align: center;
+            min-width: 100px;
+            transition: all 0.3s;
+        }
+        .option-button.selected {
+            background-color: #3498db;
+            color: white;
+            border-color: #2980b9;
+        }
+        .option-button:disabled {
+            background-color: #bdc3c7;
+            cursor: not-allowed;
+            opacity: 0.6;
+        }
+        .lesson-learned {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+        }
+        #chat-messages {
+            max-height: 300px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+        }
+        .success-message {
+            color: #27ae60;
+            font-weight: bold;
+        }
+        .error-message {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .warning-message {
+            color: #f39c12;
+            font-weight: bold;
+        }
+        .lesson-learned-badge {
+            background-color: #ffc107;
+            color: #000;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+        .no-projeto-selecionado {
+            text-align: center;
+            padding: 40px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            color: #6c757d;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .chat-input {
+            display: flex;
+            gap: 10px;
+        }
+        .examples {
+            background-color: #f8f9fa;
             padding: 15px;
             border-radius: 5px;
-            margin: 15px 0;
+            margin-top: 20px;
+        }
+        .examples h3 {
+            margin-top: 0;
+        }
+        .examples ul {
+            padding-left: 20px;
+        }
+        .examples li {
+            margin-bottom: 5px;
+            cursor: pointer;
+            color: #3498db;
+        }
+        .examples li:hover {
+            text-decoration: underline;
+        }
+        .loading {
+            color: #666;
+            font-style: italic;
+        }
+        .duplicate-warning {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            display: none;
+        }
+        .export-status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+            text-align: center;
+            font-size: 14px;
+        }
+        .export-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .export-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>Pergunta pra Pinho</h1>
-            <p>Sistema de Gestão de Informações de Projetos</p>
-        </div>
-        
-        <div class="card">
-            <h2>Seleção de Projeto</h2>
-            <select id="projeto-select">
-                <option value="">-- Selecione um Projeto --</option>
-            </select>
-            <button onclick="selecionarProjeto()">Selecionar Projeto</button>
-            <div id="projeto-status"></div>
-        </div>
-
-        <div class="card">
-            <h2>📝 Entrada de Informação</h2>
-            <div id="entrada-section">
-                <select id="categoria">
-                    <option value="Informações base">Informações base</option>
-                    <option value="Envoltória">Envoltória</option>
-                    <option value="Materiais">Materiais</option>
-                    <option value="Água">Água</option>
-                    <option value="HVAC">HVAC</option>
-                    <option value="Elétrica">Elétrica</option>
-                    <option value="LEED">LEED</option>
-                    <option value="Resíduos">Resíduos</option>
-                    <option value="Outros">Outros</option>
-                    <option value="Lessons learned">Lessons learned</option>
+    <div class="sidebar">
+        <div class="sidebar-content">
+            <h2>PPP</h2>
+            
+            <div id="projeto-info">
+                <select id="projeto-select" class="select-projeto">
+                    <option value="">-- Selecione um Projeto --</option>
                 </select>
-                
-                <input type="datetime-local" id="data-info">
-                
-                <select id="lesson-learned">
-                    <option value="não">Não é Lesson Learned</option>
-                    <option value="sim">É Lesson Learned</option>
-                </select>
-                
-                <textarea id="mensagem" rows="4" placeholder="Digite a informação que deseja registrar..."></textarea>
-                
-                <button onclick="registrarMensagem()">💾 Registrar Informação</button>
-                <div id="registro-status" style="margin-top: 10px;"></div>
-            </div>
-        </div>
-
-        <div class="card">
-            <h2>🔍 Consulta de Dados</h2>
-            <div class="chat-container" id="consulta-messages">
-                <div class="message bot">
-                    <strong>Assistente:</strong> Olá! Faça uma pergunta sobre os dados dos projetos. Exemplo: "Quantas mensagens existem?" ou "Quais categorias temos?"
+                <button onclick="selecionarProjeto()" style="width: 100%; margin-top: 0;">Selecionar Projeto</button>
+                <div id="projeto-status" class="projeto-nao-selecionado">
+                    Nenhum projeto selecionado
                 </div>
             </div>
-            <div style="display: flex; gap: 10px;">
-                <input type="text" id="pergunta" placeholder="Digite sua pergunta..." style="flex: 1;">
-                <button onclick="fazerPergunta()">📤 Perguntar</button>
-            </div>
             
-            <div class="button-group">
-                <button onclick="setExemplo('Quantas mensagens existem no total?')">📊 Total de Mensagens</button>
-                <button onclick="setExemplo('Quantas Lessons Learned existem?')">🎓 Lessons Learned</button>
-                <button onclick="setExemplo('Quais categorias existem?')">📂 Categorias</button>
-                <button onclick="setExemplo('Mostre as mensagens mais recentes')">🕒 Mensagens Recentes</button>
+            <nav>
+                <ul>
+                    <li><a href="#" onclick="carregarPagina('entrada')" id="nav-entrada" class="active">Entrada de Informação</a></li>
+                    <li><a href="#" onclick="carregarPagina('consulta')" id="nav-consulta">Consulta de Informação</a></li>
+                </ul>
+            </nav>
+
+            <div class="export-section">
+                <h3>Backup & Exportação</h3>
+                <div class="export-buttons">
+                    <button class="export-button" onclick="fazerBackup()" id="btn-backup">
+                        ☁️ Fazer Backup
+                    </button>
+                    <button class="export-button" onclick="restaurarBackup()" id="btn-restore">
+                        📥 Restaurar Backup
+                    </button>
+                    <button class="export-button" onclick="exportarDados('projeto')" id="btn-export-projeto" disabled>
+                        📤 Exportar Projeto
+                    </button>
+                    <button class="export-button" onclick="exportarDados('completo')" id="btn-export-completo">
+                        💾 Exportar Tudo
+                    </button>
+                </div>
+                <div id="backup-status" class="export-status hidden"></div>
             </div>
         </div>
+        
+        <div class="sidebar-image">
+            <img src="/static/PPP.png" alt="">
+        </div>
+    </div>
 
-        <div class="export-section">
-            <h2>📤 Exportação de Dados</h2>
-            <div class="button-group">
-                <button onclick="exportarDados('projeto')" id="btn-export-projeto" disabled>📁 Exportar Projeto</button>
-                <button onclick="exportarDados('completo')">💾 Exportar Tudo</button>
-                <button onclick="verEstatisticas()">📈 Ver Estatísticas</button>
+    <div class="main-content">
+        <div class="container">
+            <header>
+                <h1 id="titulo-pagina">Pergunta pra Pinho</h1>
+                <p id="subtitulo-pagina">Selecione um projeto no menu para começar</p>
+            </header>
+
+            <div id="conteudo-pagina">
+                <div class="no-projeto-selecionado">
+                    <h3>Selecione um projeto no menu lateral para começar</h3>
+                    <p>Escolha um projeto na lista dropdown e clique em "Selecionar Projeto"</p>
+                </div>
             </div>
-            <div id="export-status" style="margin-top: 10px;"></div>
         </div>
     </div>
 
     <script>
+        // Variáveis globais
         let projetoSelecionado = null;
+        let paginaAtual = 'entrada';
+        let entradaState = {
+            currentStep: 0,
+            categoria: '',
+            subcategoria: '',
+            dataInfo: '',
+            isLessonLearned: false,
+            isProcessing: false
+        };
         
-        // Carregar projetos ao iniciar
-        document.addEventListener('DOMContentLoaded', function() {
-            carregarProjetos();
-            // Data atual como padrão
-            document.getElementById('data-info').value = new Date().toISOString().slice(0, 16);
-        });
+        // Carregar projetos quando a página carregar
+        window.onload = function() {
+            carregarListaProjetos();
+        };
         
-        function carregarProjetos() {
+        function carregarListaProjetos() {
             fetch('/api/projetos')
-                .then(r => r.json())
+                .then(response => response.json())
                 .then(data => {
-                    const select = document.getElementById('projeto-select');
-                    data.projetos.forEach(projeto => {
-                        const option = document.createElement('option');
-                        option.value = projeto.id;
-                        option.textContent = projeto.display;
-                        select.appendChild(option);
-                    });
+                    if (data.success) {
+                        const select = document.getElementById('projeto-select');
+                        // Limpar opções existentes (exceto a primeira)
+                        while (select.options.length > 1) {
+                            select.remove(1);
+                        }
+                        
+                        data.projetos.forEach(projeto => {
+                            const option = document.createElement('option');
+                            option.value = projeto.id;
+                            option.textContent = projeto.display;
+                            select.appendChild(option);
+                        });
+                    }
+                })
+                .catch(error => {
+                    console.error('Erro ao carregar projetos:', error);
                 });
         }
         
@@ -512,203 +730,767 @@ HTML_BASE = '''
             const projetoId = select.value;
             
             if (!projetoId) {
-                alert('Por favor, selecione um projeto da lista.');
+                alert("Por favor, selecione um projeto da lista.");
                 return;
             }
             
             fetch('/api/selecionar_projeto', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {
+                    'Content-Type': 'application/json'
+                },
                 body: JSON.stringify({ projeto_id: projetoId })
             })
-            .then(r => r.json())
+            .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    projetoSelecionado = { id: projetoId, nome: data.projeto_nome };
-                    document.getElementById('projeto-status').innerHTML = 
-                        `<div class="projeto-info">Projeto selecionado: <strong>${data.projeto_nome}</strong></div>`;
-                    document.getElementById('btn-export-projeto').disabled = false;
+                    projetoSelecionado = {
+                        id: projetoId,
+                        nome: data.projeto_nome
+                    };
+                    atualizarStatusProjeto();
+                    carregarPagina(paginaAtual);
                 } else {
-                    alert('Erro: ' + data.message);
-                }
-            });
-        }
-        
-        function registrarMensagem() {
-            if (!projetoSelecionado) {
-                alert('Selecione um projeto primeiro!');
-                return;
-            }
-            
-            const categoria = document.getElementById('categoria').value;
-            const dataInfo = document.getElementById('data-info').value;
-            const mensagem = document.getElementById('mensagem').value.trim();
-            const lessonLearned = document.getElementById('lesson-learned').value;
-            
-            if (!mensagem) {
-                alert('Digite a mensagem!');
-                return;
-            }
-            
-            const statusDiv = document.getElementById('registro-status');
-            statusDiv.innerHTML = '⏳ Processando...';
-            
-            fetch('/api/registrar_mensagem', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    projeto_id: projetoSelecionado.id,
-                    categoria: categoria,
-                    data_info: dataInfo,
-                    mensagem: mensagem,
-                    lesson_learned: lessonLearned
-                })
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.success) {
-                    statusDiv.innerHTML = '✅ ' + data.message;
-                    document.getElementById('mensagem').value = '';
-                } else {
-                    statusDiv.innerHTML = '❌ ' + data.message;
+                    alert('Erro ao selecionar projeto: ' + data.message);
                 }
             })
             .catch(error => {
-                statusDiv.innerHTML = '❌ Erro ao conectar com o servidor';
+                console.error('Erro:', error);
+                alert('Erro ao selecionar projeto');
             });
         }
         
-        function fazerPergunta() {
-            if (!projetoSelecionado) {
-                alert('Selecione um projeto primeiro!');
-                return;
+        function atualizarStatusProjeto() {
+            const statusDiv = document.getElementById('projeto-status');
+            const select = document.getElementById('projeto-select');
+            const btnExportProjeto = document.getElementById('btn-export-projeto');
+            const btnBackup = document.getElementById('btn-backup');
+            const btnRestore = document.getElementById('btn-restore');
+            
+            if (projetoSelecionado) {
+                statusDiv.className = 'projeto-selecionado';
+                statusDiv.innerHTML = `Projeto: <strong>${projetoSelecionado.nome}</strong>`;
+                select.value = projetoSelecionado.id;
+                if (btnExportProjeto) btnExportProjeto.disabled = false;
+                if (btnBackup) btnBackup.disabled = false;
+                if (btnRestore) btnRestore.disabled = false;
+            } else {
+                statusDiv.className = 'projeto-nao-selecionado';
+                statusDiv.textContent = 'Nenhum projeto selecionado';
+                select.value = '';
+                if (btnExportProjeto) btnExportProjeto.disabled = true;
+                if (btnBackup) btnBackup.disabled = true;
+                if (btnRestore) btnRestore.disabled = true;
             }
+        }
+        
+        function carregarPagina(pagina) {
+            paginaAtual = pagina;
             
-            const pergunta = document.getElementById('pergunta').value.trim();
-            if (!pergunta) {
-                alert('Digite uma pergunta!');
-                return;
-            }
+            // Atualizar navegação
+            document.querySelectorAll('.sidebar nav a').forEach(link => {
+                link.classList.remove('active');
+            });
+            document.getElementById(`nav-${pagina}`).classList.add('active');
             
-            const messagesDiv = document.getElementById('consulta-messages');
-            messagesDiv.innerHTML += `<div class="message user"><strong>Você:</strong> ${pergunta}</div>`;
-            
-            // Mostrar carregamento
-            const loadingDiv = document.createElement('div');
-            loadingDiv.className = 'message bot';
-            loadingDiv.innerHTML = '<strong>Assistente:</strong> ⏳ Analisando sua pergunta...';
-            messagesDiv.appendChild(loadingDiv);
-            
-            fetch('/api/consultar_dados', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    question: pergunta,
-                    projeto_id: projetoSelecionado.id
+            // Carregar conteúdo da página
+            fetch(`/api/conteudo/${pagina}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('conteudo-pagina').innerHTML = data.conteudo;
+                        document.getElementById('titulo-pagina').textContent = data.titulo;
+                        document.getElementById('subtitulo-pagina').textContent = data.subtitulo;
+                        
+                        // Inicializar a página carregada
+                        if (pagina === 'entrada') {
+                            inicializarEntrada();
+                        } else if (pagina === 'consulta') {
+                            inicializarConsulta();
+                        }
+                    }
                 })
+                .catch(error => {
+                    console.error('Erro ao carregar conteúdo:', error);
+                    document.getElementById('conteudo-pagina').innerHTML = '<div class="error-message">Erro ao carregar a página</div>';
+                });
+        }
+        
+        function fazerBackup() {
+            const statusDiv = document.getElementById('backup-status');
+            
+            if (statusDiv) {
+                statusDiv.className = 'export-status';
+                statusDiv.textContent = '⏳ Fazendo backup na nuvem...';
+                statusDiv.classList.remove('hidden');
+            }
+            
+            fetch('/api/fazer_backup', {
+                method: 'POST'
             })
-            .then(r => r.json())
+            .then(response => response.json())
             .then(data => {
-                // Remover mensagem de carregamento
-                messagesDiv.removeChild(loadingDiv);
-                
-                if (data.success) {
-                    messagesDiv.innerHTML += `<div class="message bot"><strong>Assistente:</strong> ${data.answer}</div>`;
-                } else {
-                    messagesDiv.innerHTML += `<div class="message bot"><strong>Assistente:</strong> ❌ Erro: ${data.message}</div>`;
+                if (statusDiv) {
+                    if (data.success) {
+                        statusDiv.className = 'export-status export-success';
+                        statusDiv.textContent = '✅ ' + data.message;
+                    } else {
+                        statusDiv.className = 'export-status export-error';
+                        statusDiv.textContent = '❌ ' + data.message;
+                    }
                 }
-                
-                document.getElementById('pergunta').value = '';
-                messagesDiv.scrollTop = messagesDiv.scrollHeight;
             })
             .catch(error => {
-                messagesDiv.removeChild(loadingDiv);
-                messagesDiv.innerHTML += `<div class="message bot"><strong>Assistente:</strong> ❌ Erro de conexão</div>`;
-                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                console.error('Erro no backup:', error);
+                if (statusDiv) {
+                    statusDiv.className = 'export-status export-error';
+                    statusDiv.textContent = '❌ Erro no backup';
+                }
             });
         }
-        
-        function setExemplo(pergunta) {
-            document.getElementById('pergunta').value = pergunta;
+
+        function restaurarBackup() {
+            if (!confirm('⚠️ Atenção! Isso substituirá o banco de dados local pelo da nuvem. Continuar?')) {
+                return;
+            }
+            
+            const statusDiv = document.getElementById('backup-status');
+            
+            if (statusDiv) {
+                statusDiv.className = 'export-status';
+                statusDiv.textContent = '⏳ Restaurando backup...';
+                statusDiv.classList.remove('hidden');
+            }
+            
+            fetch('/api/restaurar_backup', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (statusDiv) {
+                    if (data.success) {
+                        statusDiv.className = 'export-status export-success';
+                        statusDiv.textContent = '✅ ' + data.message;
+                        // Recarrega a página para refletir os dados restaurados
+                        setTimeout(() => location.reload(), 2000);
+                    } else {
+                        statusDiv.className = 'export-status export-error';
+                        statusDiv.textContent = '❌ ' + data.message;
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Erro na restauração:', error);
+                if (statusDiv) {
+                    statusDiv.className = 'export-status export-error';
+                    statusDiv.textContent = '❌ Erro na restauração';
+                }
+            });
         }
         
         function exportarDados(tipo) {
             const projetoId = tipo === 'projeto' && projetoSelecionado ? projetoSelecionado.id : null;
-            const statusDiv = document.getElementById('export-status');
+            const statusDiv = document.getElementById('backup-status');
             
-            statusDiv.innerHTML = '⏳ Gerando arquivo...';
+            if (statusDiv) {
+                statusDiv.className = 'export-status';
+                statusDiv.textContent = '⏳ Gerando arquivo...';
+                statusDiv.classList.remove('hidden');
+            }
             
             fetch('/api/exportar_csv', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: {
+                    'Content-Type': 'application/json'
+                },
                 body: JSON.stringify({ projeto_id: projetoId })
             })
-            .then(r => r.json())
+            .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    statusDiv.innerHTML = '✅ ' + data.message;
-                    // Download automático
+                    if (statusDiv) {
+                        statusDiv.className = 'export-status export-success';
+                        statusDiv.textContent = '✅ ' + data.message;
+                    }
+                    
+                    // Download automático do arquivo
                     window.open(`/api/download_csv/${data.arquivo}`, '_blank');
+                    
                 } else {
-                    statusDiv.innerHTML = '❌ ' + data.message;
+                    if (statusDiv) {
+                        statusDiv.className = 'export-status export-error';
+                        statusDiv.textContent = '❌ ' + data.message;
+                    }
                 }
             })
             .catch(error => {
-                statusDiv.innerHTML = '❌ Erro na exportação';
+                console.error('Erro na exportação:', error);
+                if (statusDiv) {
+                    statusDiv.className = 'export-status export-error';
+                    statusDiv.textContent = '❌ Erro na exportação';
+                }
             });
         }
         
-        function verEstatisticas() {
-            if (!projetoSelecionado) {
-                alert('Selecione um projeto primeiro!');
+        // ===== FUNÇÕES PARA ENTRADA DE INFORMAÇÃO =====
+        function inicializarEntrada() {
+            // Inicializar a data atual
+            const now = new Date();
+            const localDateTime = now.toISOString().slice(0, 16);
+            const dataInput = document.getElementById('data-info');
+            if (dataInput) dataInput.value = localDateTime;
+            
+            // Verificar se há projeto selecionado
+            const mensagemInicial = document.getElementById('mensagem-inicial');
+            if (mensagemInicial) {
+                if (projetoSelecionado) {
+                    mensagemInicial.textContent = 
+                        `Olá! Você está registrando informações para o projeto ${projetoSelecionado.nome}. Selecione a categoria da informação.`;
+                    // Mostrar primeira etapa
+                    const categoriaStep = document.getElementById('categoria-step');
+                    if (categoriaStep) categoriaStep.classList.remove('hidden');
+                } else {
+                    mensagemInicial.textContent = 
+                        'Por favor, selecione um projeto no menu lateral para começar a registrar informações.';
+                }
+            }
+            
+            // Resetar estado
+            entradaState = {
+                currentStep: 0,
+                categoria: '',
+                subcategoria: '',
+                dataInfo: '',
+                isLessonLearned: false,
+                isProcessing: false
+            };
+            
+            // Adicionar event listener para verificação de duplicatas em tempo real
+            const mensagemInput = document.getElementById('mensagem');
+            if (mensagemInput) {
+                mensagemInput.addEventListener('input', verificarDuplicataEmTempoReal);
+            }
+        }
+        
+        // Função para verificar duplicatas em tempo real
+        function verificarDuplicataEmTempoReal() {
+            if (!projetoSelecionado || !entradaState.categoria) return;
+            
+            const mensagemInput = document.getElementById('mensagem');
+            const mensagem = mensagemInput ? mensagemInput.value.trim() : '';
+            const submitButton = document.querySelector('#mensagem-step button');
+            const warningDiv = document.getElementById('duplicate-warning');
+            
+            if (mensagem.length < 5) {
+                if (warningDiv) warningDiv.style.display = 'none';
+                if (submitButton) submitButton.disabled = true;
                 return;
             }
             
-            const projetoId = projetoSelecionado.id;
-            const statusDiv = document.getElementById('export-status');
-            
-            statusDiv.innerHTML = '⏳ Carregando estatísticas...';
-            
-            fetch('/api/estatisticas', {
+            // Verificar duplicata via API
+            fetch('/api/verificar_duplicata', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ projeto_id: projetoId })
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    projeto_id: projetoSelecionado.id,
+                    categoria: entradaState.isLessonLearned ? `Lessons learned - ${entradaState.subcategoria}` : entradaState.categoria,
+                    mensagem: mensagem
+                })
             })
-            .then(r => r.json())
+            .then(response => response.json())
             .then(data => {
-                if (data.success) {
-                    const stats = data.estatisticas;
-                    let html = `<div style="background: white; color: black; padding: 15px; border-radius: 5px; margin-top: 10px;">
-                        <h3>📊 Estatísticas - ${stats.projeto}</h3>
-                        <p><strong>Total de Mensagens:</strong> ${stats.total}</p>
-                        <p><strong>Lessons Learned:</strong> ${stats.lessons_learned}</p>
-                        <p><strong>Distribuição por Categoria:</strong></p>
-                        <ul>`;
-                    
-                    stats.por_categoria.forEach(cat => {
-                        html += `<li>${cat.categoria}: ${cat.quantidade} mensagens</li>`;
-                    });
-                    
-                    html += `</ul></div>`;
-                    statusDiv.innerHTML = html;
-                } else {
-                    statusDiv.innerHTML = '❌ ' + data.message;
+                if (submitButton) {
+                    submitButton.disabled = data.is_duplicata || entradaState.isProcessing;
+                    if (data.is_duplicata) {
+                        submitButton.innerHTML = '⚠️ Informação Já Registrada';
+                    } else {
+                        submitButton.innerHTML = 'Registrar Informação';
+                    }
+                }
+                
+                if (warningDiv) {
+                    if (data.is_duplicata) {
+                        warningDiv.style.display = 'block';
+                        warningDiv.innerHTML = '⚠️ <strong>Atenção:</strong> Esta informação parece já ter sido registrada anteriormente.';
+                    } else {
+                        warningDiv.style.display = 'none';
+                    }
                 }
             })
             .catch(error => {
-                statusDiv.innerHTML = '❌ Erro ao carregar estatísticas';
+                console.error('Erro ao verificar duplicata:', error);
             });
         }
         
-        // Enter para enviar pergunta
-        document.getElementById('pergunta').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                fazerPergunta();
+        // Funções globais para entrada de informação
+        window.selectCategory = function(element, selectedCategory) {
+            if (!projetoSelecionado || entradaState.isProcessing) return;
+            
+            // Remover seleção anterior
+            const buttons = document.querySelectorAll('#categoria-step .option-button');
+            buttons.forEach(button => button.classList.remove('selected'));
+            
+            // Selecionar nova categoria
+            element.classList.add('selected');
+            entradaState.categoria = selectedCategory;
+            entradaState.isLessonLearned = (selectedCategory === 'Lessons learned');
+        };
+        
+        window.submitCategory = function() {
+            if (!projetoSelecionado) {
+                alert("Por favor, selecione um projeto primeiro.");
+                return;
             }
-        });
+            
+            if (!entradaState.categoria) {
+                alert("Por favor, selecione uma categoria.");
+                return;
+            }
+            
+            addMessage(`Categoria: ${entradaState.categoria}`, "user");
+            document.getElementById('categoria-step').classList.add('hidden');
+            
+            if (entradaState.isLessonLearned) {
+                // Se for Lesson Learned, perguntar a subcategoria
+                document.getElementById('subcategoria-step').classList.remove('hidden');
+                addMessage("Agora selecione a subcategoria desta Lesson Learned.", "bot");
+                entradaState.currentStep = 2;
+            } else {
+                // Se não for Lesson Learned, ir para a data
+                document.getElementById('data-step').classList.remove('hidden');
+                addMessage("Agora informe a data da informação. A data atual já está preenchida, mas você pode alterá-la se necessário.", "bot");
+                entradaState.currentStep = 3;
+            }
+        };
+        
+        window.selectSubCategory = function(element, selectedSubCategory) {
+            if (entradaState.isProcessing) return;
+            
+            // Remover seleção anterior
+            const buttons = document.querySelectorAll('#subcategoria-step .option-button');
+            buttons.forEach(button => button.classList.remove('selected'));
+            
+            // Selecionar nova subcategoria
+            element.classList.add('selected');
+            entradaState.subcategoria = selectedSubCategory;
+        };
+        
+        window.submitSubCategory = function() {
+            if (!entradaState.subcategoria) {
+                alert("Por favor, selecione uma subcategoria.");
+                return;
+            }
+            
+            addMessage(`Subcategoria: ${entradaState.subcategoria}`, "user");
+            document.getElementById('subcategoria-step').classList.add('hidden');
+            document.getElementById('data-step').classList.remove('hidden');
+            addMessage("Agora informe a data da informação. A data atual já está preenchida, mas você pode alterá-la se necessário.", "bot");
+            entradaState.currentStep = 3;
+        };
+        
+        window.submitDate = function() {
+            if (entradaState.isProcessing) return;
+            
+            const dataInput = document.getElementById('data-info');
+            entradaState.dataInfo = dataInput ? dataInput.value : '';
+            
+            if (!entradaState.dataInfo) {
+                alert("Por favor, informe a data.");
+                return;
+            }
+            
+            addMessage(`Data: ${formatDateTime(entradaState.dataInfo)}`, "user");
+            document.getElementById('data-step').classList.add('hidden');
+            document.getElementById('mensagem-step').classList.remove('hidden');
+            addMessage("Por fim, digite a informação que deseja registrar.", "bot");
+            entradaState.currentStep = 4;
+            
+            // Adicionar div de aviso de duplicata se não existir
+            if (!document.getElementById('duplicate-warning')) {
+                const warningDiv = document.createElement('div');
+                warningDiv.id = 'duplicate-warning';
+                warningDiv.className = 'duplicate-warning hidden';
+                document.getElementById('mensagem-step').insertBefore(warningDiv, document.querySelector('#mensagem-step button'));
+            }
+            
+            // Verificar duplicata inicial
+            setTimeout(verificarDuplicataEmTempoReal, 100);
+        };
+        
+        window.submitMessage = function() {
+            if (entradaState.isProcessing) return;
+            
+            const mensagemInput = document.getElementById('mensagem');
+            const mensagem = mensagemInput ? mensagemInput.value.trim() : '';
+            const submitButton = document.querySelector('#mensagem-step button');
+            
+            if (!mensagem) {
+                alert("Por favor, digite a informação.");
+                return;
+            }
+            
+            // Desabilitar botão e mostrar estado de processamento
+            entradaState.isProcessing = true;
+            if (submitButton) {
+                submitButton.disabled = true;
+                submitButton.classList.add('processing');
+                submitButton.innerHTML = '⏳ Processando...';
+            }
+            
+            // Desabilitar outros botões
+            document.querySelectorAll('#input-section button').forEach(btn => {
+                if (btn !== submitButton) btn.disabled = true;
+            });
+            
+            addMessage(`Informação: ${mensagem}`, "user");
+            
+            // Mostrar mensagem de processamento
+            addMessage("⏳ Processando e salvando a informação...", "bot");
+            
+            // Determinar a categoria final
+            let categoriaFinal = entradaState.categoria;
+            if (entradaState.isLessonLearned) {
+                categoriaFinal = `Lessons learned - ${entradaState.subcategoria}`;
+            }
+            
+            // Determinar se é lesson learned
+            const lessonLearned = entradaState.isLessonLearned ? 'sim' : 'não';
+            
+            // Enviar dados para o servidor
+            fetch('/api/registrar_mensagem', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    projeto_id: projetoSelecionado.id,
+                    categoria: categoriaFinal,
+                    data_info: entradaState.dataInfo,
+                    mensagem: mensagem,
+                    lesson_learned: lessonLearned
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Remover mensagem de processamento
+                const chatMessages = document.getElementById('chat-messages');
+                if (chatMessages && chatMessages.lastChild && chatMessages.lastChild.textContent.includes("Processando")) {
+                    chatMessages.removeChild(chatMessages.lastChild);
+                }
+                
+                if (data.success) {
+                    const successMsg = entradaState.isLessonLearned 
+                        ? "✅ Lesson Learned registrada com sucesso! O contexto foi analisado automaticamente." 
+                        : "✅ Informação registrada com sucesso! O contexto foi analisado automaticamente.";
+                    
+                    addMessage(successMsg, "bot");
+                    
+                    // Resetar o formulário
+                    setTimeout(() => {
+                        resetFormEntrada();
+                        entradaState.isProcessing = false;
+                    }, 1000);
+                    
+                } else {
+                    addMessage(`❌ ${data.message}`, "bot");
+                    
+                    // Reabilitar botão em caso de erro
+                    setTimeout(() => {
+                        entradaState.isProcessing = false;
+                        if (submitButton) {
+                            submitButton.disabled = false;
+                            submitButton.classList.remove('processing');
+                            submitButton.innerHTML = 'Registrar Informação';
+                        }
+                        document.querySelectorAll('#input-section button').forEach(btn => {
+                            if (btn !== submitButton) btn.disabled = false;
+                        });
+                    }, 2000);
+                }
+            })
+            .catch(error => {
+                addMessage(`❌ Erro ao conectar com o servidor: ${error}`, "bot");
+                
+                // Reabilitar botão em caso de erro
+                setTimeout(() => {
+                    entradaState.isProcessing = false;
+                    if (submitButton) {
+                        submitButton.disabled = false;
+                        submitButton.classList.remove('processing');
+                        submitButton.innerHTML = 'Registrar Informação';
+                    }
+                    document.querySelectorAll('#input-section button').forEach(btn => {
+                        if (btn !== submitButton) btn.disabled = false;
+                    });
+                }, 2000);
+            });
+        };
+        
+        function resetFormEntrada() {
+            const mensagemInput = document.getElementById('mensagem');
+            if (mensagemInput) mensagemInput.value = '';
+            
+            // Resetar seleções
+            const categoriaButtons = document.querySelectorAll('#categoria-step .option-button');
+            categoriaButtons.forEach(button => {
+                button.classList.remove('selected');
+                button.disabled = false;
+            });
+            
+            const subcategoriaButtons = document.querySelectorAll('#subcategoria-step .option-button');
+            subcategoriaButtons.forEach(button => {
+                button.classList.remove('selected');
+                button.disabled = false;
+            });
+            
+            // Resetar estado
+            entradaState = {
+                currentStep: 0,
+                categoria: '',
+                subcategoria: '',
+                dataInfo: '',
+                isLessonLearned: false,
+                isProcessing: false
+            };
+            
+            // Restaurar data atual
+            const now = new Date();
+            const localDateTime = now.toISOString().slice(0, 16);
+            const dataInput = document.getElementById('data-info');
+            if (dataInput) dataInput.value = localDateTime;
+            
+            // Voltar para a primeira etapa
+            document.getElementById('categoria-step').classList.remove('hidden');
+            document.getElementById('subcategoria-step').classList.add('hidden');
+            document.getElementById('data-step').classList.add('hidden');
+            document.getElementById('mensagem-step').classList.add('hidden');
+            
+            // Esconder aviso de duplicata
+            const warningDiv = document.getElementById('duplicate-warning');
+            if (warningDiv) warningDiv.style.display = 'none';
+            
+            // Reabilitar todos os botões
+            document.querySelectorAll('#input-section button').forEach(btn => {
+                btn.disabled = false;
+                btn.classList.remove('processing');
+                const originalText = btn.getAttribute('data-original-text') || btn.textContent;
+                btn.innerHTML = originalText;
+            });
+            
+            addMessage("Selecione a categoria para registrar nova informação.", "bot");
+        }
+        
+        function addMessage(text, sender) {
+            const chatMessages = document.getElementById('chat-messages');
+            if (!chatMessages) return;
+            
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message');
+            messageDiv.classList.add(sender === 'bot' ? 'bot-message' : 'user-message');
+            messageDiv.textContent = text;
+            
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        function formatDateTime(dateTimeStr) {
+            const date = new Date(dateTimeStr);
+            return date.toLocaleString('pt-BR');
+        }
+        
+        // ===== FUNÇÕES PARA CONSULTA =====
+        function inicializarConsulta() {
+            const mensagemInicial = document.querySelector('#chat-messages .bot-message');
+            if (mensagemInicial) {
+                if (projetoSelecionado) {
+                    mensagemInicial.textContent = 
+                        `Olá! Sou seu assistente para consulta de informações do projeto ${projetoSelecionado.nome}. ` +
+                        `Posso ajudar você a analisar os dados deste projeto. O que gostaria de saber?`;
+                } else {
+                    mensagemInicial.textContent = 
+                        'Olá! Sou seu assistente para consulta de informações do banco de dados. ' +
+                        'Selecione um projeto no menu lateral para consultar dados específicos, ou faça perguntas gerais sobre todos os projetos.';
+                }
+            }
+        }
+        
+        // Funções globais para consulta (mantidas como antes)
+        window.handleKeyPress = function(event) {
+            if (event.key === 'Enter') {
+                askQuestion();
+            }
+        };
+
+        window.setExample = function(element) {
+            const userQuestion = document.getElementById('user-question');
+            if (userQuestion) userQuestion.value = element.textContent;
+        };
+
+        window.askQuestion = function() {
+            const userQuestion = document.getElementById('user-question');
+            const question = userQuestion ? userQuestion.value.trim() : '';
+            
+            if (!question) {
+                alert('Por favor, digite uma pergunta.');
+                return;
+            }
+
+            // Adiciona a pergunta do usuário ao chat
+            addMessageConsulta(question, 'user');
+            if (userQuestion) userQuestion.value = '';
+
+            // Adiciona mensagem de carregamento
+            const loadingId = addMessageConsulta('Analisando sua pergunta...', 'bot', true);
+
+            // Enviar projeto_id se estiver selecionado
+            const projetoId = projetoSelecionado ? projetoSelecionado.id : null;
+
+            // Envia a pergunta para o servidor
+            fetch('/api/consultar_dados', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ 
+                    question: question,
+                    projeto_id: projetoId
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                // Remove a mensagem de carregamento
+                removeLoadingMessage(loadingId);
+
+                if (data.success) {
+                    addMessageConsulta(data.answer, 'bot');
+                } else {
+                    addMessageConsulta('❌ Erro: ' + data.message, 'bot');
+                }
+            })
+            .catch(error => {
+                removeLoadingMessage(loadingId);
+                addMessageConsulta('❌ Erro ao conectar com o servidor: ' + error, 'bot');
+            });
+        };
+
+        function addMessageConsulta(text, sender, isTemp = false) {
+            const chatMessages = document.getElementById('chat-messages');
+            if (!chatMessages) return null;
+            
+            const messageDiv = document.createElement('div');
+            messageDiv.classList.add('message');
+            messageDiv.classList.add(sender === 'bot' ? 'bot-message' : 'user-message');
+            
+            if (isTemp) {
+                messageDiv.classList.add('loading');
+                messageDiv.id = 'temp-' + Date.now();
+            }
+            
+            messageDiv.textContent = text;
+            
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            return isTemp ? messageDiv.id : null;
+        }
+
+        function removeLoadingMessage(id) {
+            const element = document.getElementById(id);
+            if (element) {
+                element.remove();
+            }
+        }
     </script>
 </body>
 </html>
+'''
+
+# HTML para a página de entrada de informação
+HTML_ENTRADA = '''
+<div class="chat-container">
+    <div id="chat-messages">
+        <div class="message bot-message" id="mensagem-inicial">
+            Carregando...
+        </div>
+    </div>
+
+    <div id="input-section">
+        <div id="categoria-step" class="input-group hidden">
+            <label>Selecione a categoria:</label>
+            <div class="option-buttons">
+                <div class="option-button" onclick="selectCategory(this, 'Informações base')">Informações base</div>
+                <div class="option-button" onclick="selectCategory(this, 'Envoltória')">Envoltória</div>
+                <div class="option-button" onclick="selectCategory(this, 'Materiais')">Materiais</div>
+                <div class="option-button" onclick="selectCategory(this, 'Água')">Água</div>
+                <div class="option-button" onclick="selectCategory(this, 'HVAC')">HVAC</div>
+                <div class="option-button" onclick="selectCategory(this, 'Elétrica')">Elétrica</div>
+                <div class="option-button" onclick="selectCategory(this, 'LEED')">LEED</div>
+                <div class="option-button" onclick="selectCategory(this, 'Resíduos')">Resíduos</div>
+                <div class="option-button" onclick="selectCategory(this, 'Outros')">Outros</div>
+                <div class="option-button" onclick="selectCategory(this, 'Lessons learned')">Lessons learned</div>
+
+            </div>
+            <button onclick="submitCategory()">Enviar</button>
+        </div>
+
+        <div id="subcategoria-step" class="input-group hidden">
+            <label>Selecione a categoria da Lesson Learned:</label>
+            <div class="option-buttons">
+                <div class="option-button" onclick="selectCategory(this, 'Informações base')">Informações base</div>
+                <div class="option-button" onclick="selectCategory(this, 'Envoltória')">Envoltória</div>
+                <div class="option-button" onclick="selectCategory(this, 'Materiais')">Materiais</div>
+                <div class="option-button" onclick="selectCategory(this, 'Água')">Água</div>
+                <div class="option-button" onclick="selectCategory(this, 'HVAC')">HVAC</div>
+                <div class="option-button" onclick="selectCategory(this, 'Elétrica')">Elétrica</div>
+                <div class="option-button" onclick="selectCategory(this, 'LEED')">LEED</div>
+                <div class="option-button" onclick="selectCategory(this, 'Resíduos')">Resíduos</div>
+                <div class="option-button" onclick="selectCategory(this, 'Outros')">Outros</div>
+            </div>
+            <button onclick="submitSubCategory()">Enviar</button>
+        </div>
+
+        <div id="data-step" class="input-group hidden">
+            <label for="data-info">Data da Informação:</label>
+            <input type="datetime-local" id="data-info">
+            <button onclick="submitDate()">Enviar</button>
+        </div>
+
+        <div id="mensagem-step" class="input-group hidden">
+            <label for="mensagem">Informação:</label>
+            <textarea id="mensagem" rows="4" placeholder="Digite a informação que deseja registrar"></textarea>
+            <button onclick="submitMessage()">Registrar Informação</button>
+        </div>
+    </div>
+</div>
+'''
+
+# HTML para a página de consulta
+HTML_CONSULTA = '''
+<div class="chat-container" style="height: 600px; display: flex; flex-direction: column;">
+    <div id="chat-messages" class="chat-messages">
+        <div class="message bot-message">
+            Carregando...
+        </div>
+    </div>
+
+    <div class="chat-input">
+        <input type="text" id="user-question" placeholder="Digite sua pergunta sobre os dados..." onkeypress="handleKeyPress(event)">
+        <button onclick="askQuestion()">Enviar</button>
+    </div>
+</div>
+
+<div class="examples">
+    <h3>Exemplos de perguntas:</h3>
+    <ul>
+        <li onclick="setExample(this)">Quantas mensagens existem no total?</li>
+        <li onclick="setExample(this)">Quantas Lessons Learned existem?</li>
+        <li onclick="setExample(this)">Quais categorias existem e quantas mensagens têm cada uma?</li>
+        <li onclick="setExample(this)">Mostre as mensagens mais recentes</li>
+        <li onclick="setExample(this)">Quantas mensagens existem por projeto?</li>
+    </ul>
+</div>
 '''
 
 # Rotas
@@ -807,3 +1589,4 @@ if __name__ == '__main__':
     port = int(os.getenv('PORT', 5000))
     print(f"🚀 Servidor iniciado na porta {port}")
     app.run(debug=debug_mode, host='0.0.0.0', port=port)
+
